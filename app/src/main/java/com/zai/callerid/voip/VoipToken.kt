@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Base64
 import com.zai.callerid.data.Prefs
 import org.json.JSONObject
-import java.security.MessageDigest
+import java.util.UUID
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -14,20 +14,7 @@ import javax.crypto.spec.SecretKeySpec
  * Self-contained — no livekit-server-sdk dependency (which conflicts with the
  * Android client SDK's protobuf-javalite). Implements the LiveKit JWT format:
  *   header = { alg: HS256, typ: JWT, kid: <api_key> }
- *   payload = {
- *     iss: <api_key>,
- *     sub: <identity>,
- *     nbf, exp,
- *     video: {
- *       room: <room_name>,
- *       roomJoin: true,
- *       canPublish: true,
- *       canSubscribe: true,
- *       canPublishData: true
- *     },
- *     sid: <random>,  // optional
- *     jti: <random>   // optional
- *   }
+ *   payload = { iss, sub, nbf, exp, video: {room, roomJoin, canPublish, ...} }
  * Signed with the API secret using HMAC-SHA256.
  */
 object VoipToken {
@@ -56,17 +43,16 @@ object VoipToken {
                 .put("iss", key)
                 .put("sub", user)
                 .put("nbf", nowSec - 30)
-                .put("exp", nowSec + 3600) // 1 hour token
+                .put("exp", nowSec + 3600) // 1-hour token
                 .put("video", video)
-                .put("jti", java.util.UUID.randomUUID().toString())
-                .put("sid", java.util.UUID.randomUUID().toString())
+                .put("jti", UUID.randomUUID().toString())
+                .put("sid", UUID.randomUUID().toString())
 
-            "${base64Url(header.toString().toByteArray())}." +
-                "${base64Url(payload.toString().toByteArray())}." +
-                base64Url(hmacSha256(
-                    "${base64Url(header.toString().toByteArray())}.${base64Url(payload.toString().toByteArray())}",
-                    secret
-                ))
+            val headerB64 = base64Url(header.toString().toByteArray())
+            val payloadB64 = base64Url(payload.toString().toByteArray())
+            val signingInput = "$headerB64.$payloadB64"
+            val sig = base64Url(hmacSha256(signingInput, secret))
+            "$signingInput.$sig"
         } catch (e: Exception) {
             null
         }

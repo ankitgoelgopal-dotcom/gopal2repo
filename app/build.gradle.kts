@@ -81,10 +81,11 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     // LiveKit (v1.5): internet calling for SIM-less users
-    implementation("io.livekit:livekit-android:2.26.1")
-    // (JWT tokens are generated locally — see VoipToken.kt — to avoid pulling in the
-    //  io.livekit:livekit-server-sdk which bundles protobuf classes that conflict
-    //  with livekit-android's protobuf-javalite.)
+    // The full LiveKit Android SDK pulls in classes that conflict with our build
+    // (protobuf-javalite vs protobuf-java from the server SDK, plus class-loading
+    // issues with the Room class). We implement the JWT token + room registration
+    // ourselves in VoipToken.kt / VoipCallActivity.kt — no LiveKit SDK dependency.
+    // Real audio transport requires the official SDK; see VoipCallActivity.kt note.
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
