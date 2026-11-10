@@ -1,24 +1,34 @@
 package com.zai.callerid.voip
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
-import io.livekit.server.AccessToken
-import io.livekit.server.RoomJoin
-import io.livekit.server.RoomName
-import io.livekit.server.RoomCreate
-import io.livekit.server.CanPublish
-import io.livekit.server.CanSubscribe
-import io.livekit.server.CanPublishData
-import livekit.org.webrtc.EglBase
+import android.util.Base64
 import com.zai.callerid.data.Prefs
+import org.json.JSONObject
+import java.security.MessageDigest
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
- * Generates a short-lived LiveKit access token for joining/creating a room.
- * Uses the user's API key + secret pasted in Setup (LiveKit card).
+ * Generates a short-lived LiveKit access token (JWT) for joining a room.
  *
- * The token grants publish + subscribe + data so both sides can send/receive audio.
+ * Self-contained — no livekit-server-sdk dependency (which conflicts with the
+ * Android client SDK's protobuf-javalite). Implements the LiveKit JWT format:
+ *   header = { alg: HS256, typ: JWT, kid: <api_key> }
+ *   payload = {
+ *     iss: <api_key>,
+ *     sub: <identity>,
+ *     nbf, exp,
+ *     video: {
+ *       room: <room_name>,
+ *       roomJoin: true,
+ *       canPublish: true,
+ *       canSubscribe: true,
+ *       canPublishData: true
+ *     },
+ *     sid: <random>,  // optional
+ *     jti: <random>   // optional
+ *   }
+ * Signed with the API secret using HMAC-SHA256.
  */
 object VoipToken {
 
@@ -28,19 +38,47 @@ object VoipToken {
         if (key.isBlank() || secret.isBlank()) return null
         val user = identity?.takeIf { it.isNotBlank() } ?: Prefs.livekitIdentity(context)
         return try {
-            AccessToken(key, secret, emptyList()).apply {
-                identity = user
-                addGrants(
-                    RoomName(roomName),
-                    RoomCreate(true),
-                    RoomJoin(true),
-                    CanPublish(true),
-                    CanSubscribe(true),
-                    CanPublishData(true)
-                )
-            }.toJwt()
+            val nowSec = System.currentTimeMillis() / 1000
+            val header = JSONObject()
+                .put("alg", "HS256")
+                .put("typ", "JWT")
+                .put("kid", key)
+
+            val video = JSONObject()
+                .put("room", roomName)
+                .put("roomJoin", true)
+                .put("roomCreate", true)
+                .put("canPublish", true)
+                .put("canSubscribe", true)
+                .put("canPublishData", true)
+
+            val payload = JSONObject()
+                .put("iss", key)
+                .put("sub", user)
+                .put("nbf", nowSec - 30)
+                .put("exp", nowSec + 3600) // 1 hour token
+                .put("video", video)
+                .put("jti", java.util.UUID.randomUUID().toString())
+                .put("sid", java.util.UUID.randomUUID().toString())
+
+            "${base64Url(header.toString().toByteArray())}." +
+                "${base64Url(payload.toString().toByteArray())}." +
+                base64Url(hmacSha256(
+                    "${base64Url(header.toString().toByteArray())}.${base64Url(payload.toString().toByteArray())}",
+                    secret
+                ))
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun base64Url(bytes: ByteArray): String =
+        Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+
+    private fun hmacSha256(message: String, secret: String): ByteArray {
+        val key = SecretKeySpec(secret.toByteArray(), "HmacSHA256")
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(key)
+        return mac.doFinal(message.toByteArray())
     }
 }

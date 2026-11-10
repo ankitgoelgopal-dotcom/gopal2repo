@@ -82,11 +82,9 @@ dependencies {
 
     // LiveKit (v1.5): internet calling for SIM-less users
     implementation("io.livekit:livekit-android:2.30.0")
-    implementation("io.livekit:livekit-server:0.8.1") {
-        // livekit-server uses full protobuf-java which conflicts with protobuf-javalite
-        // pulled in transitively by livekit-android. Exclude it; we don't need server-side protos.
-        exclude(group = "com.google.protobuf")
-    }
+    // (JWT tokens are generated locally — see VoipToken.kt — to avoid pulling in the
+    //  io.livekit:livekit-server-sdk which bundles protobuf classes that conflict
+    //  with livekit-android's protobuf-javalite.)
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
