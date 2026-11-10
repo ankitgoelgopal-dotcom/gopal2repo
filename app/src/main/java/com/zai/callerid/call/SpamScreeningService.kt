@@ -6,14 +6,20 @@ import android.os.Build
 import android.telecom.Call
 import android.telecom.CallScreeningService
 import androidx.core.app.NotificationCompat
+import com.zai.callerid.data.ContactsRepo
 import com.zai.callerid.data.NumberUtils
+import com.zai.callerid.data.Prefs
 import com.zai.callerid.data.SpamDb
 
 /**
  * The core Truecaller feature: every incoming call passes through here
  * (after the user grants the "Caller ID & spam app" role).
- * Spam numbers are rejected automatically; the caller number is cached
- * for the overlay popup.
+ *
+ * Rejection rules, in order:
+ *  1. Number in spam list (blocked=true)          -> reject
+ *  2. Number matches a prefix rule (e.g. "+92")   -> reject
+ *  3. Silent hours + unknown caller (not in contacts) -> reject
+ *  4. Otherwise                                   -> allow
  */
 class SpamScreeningService : CallScreeningService() {
 
@@ -30,22 +36,42 @@ class SpamScreeningService : CallScreeningService() {
         }
 
         val key = NumberUtils.matchKey(rawNumber)
-        val spam = if (key.isNotBlank()) SpamDb.get(this).dao().getByKeySync(key) else null
+        val db = SpamDb.get(this)
+        val spam = if (key.isNotBlank()) db.dao().getByKeySync(key) else null
+
+        val rejectSpam = spam != null && spam.blocked
+
+        val prefixHit = !rejectSpam && key.isNotBlank() && db.prefixDao().getAllSync().any {
+            it.prefix.isNotBlank() && rawNumber.startsWith(it.prefix)
+        }
+
+        val silentHit = !rejectSpam && !prefixHit &&
+            Prefs.silentEnabled(this) &&
+            Prefs.inSilentWindow(Prefs.silentStart(this), Prefs.silentEnd(this)) &&
+            rawNumber.isNotBlank() &&
+            ContactsRepo.nameFor(this, rawNumber) == null
+
+        val reject = rejectSpam || prefixHit || silentHit
 
         val response = CallResponse.Builder()
-            .setDisallowCall(spam != null && spam.blocked)
-            .setRejectCall(spam != null && spam.blocked)
+            .setDisallowCall(reject)
+            .setRejectCall(reject)
             .setSkipCallLog(false)
-            .setSkipNotification(spam != null && spam.blocked)
+            .setSkipNotification(reject)
             .build()
         respondToCall(details, response)
 
-        if (spam != null && spam.blocked) {
-            notifyBlocked(rawNumber, spam.label)
+        if (reject) {
+            val reason = when {
+                rejectSpam -> spam?.label ?: "spam"
+                prefixHit -> "prefix rule"
+                else -> "silent hours"
+            }
+            notifyBlocked(rawNumber, reason)
         }
     }
 
-    private fun notifyBlocked(number: String, label: String) {
+    private fun notifyBlocked(number: String, reason: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(
@@ -58,8 +84,8 @@ class SpamScreeningService : CallScreeningService() {
         }
         val notification = NotificationCompat.Builder(this, "spam_blocked")
             .setSmallIcon(android.R.drawable.ic_delete)
-            .setContentTitle("Spam call blocked")
-            .setContentText("$number was rejected automatically ($label)")
+            .setContentTitle("Call rejected")
+            .setContentText("$number was rejected automatically ($reason)")
             .setAutoCancel(true)
             .build()
         try {

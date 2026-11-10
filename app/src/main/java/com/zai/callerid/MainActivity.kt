@@ -9,8 +9,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
@@ -36,7 +37,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -61,6 +61,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,11 +73,17 @@ import com.zai.callerid.data.CallLogEntry
 import com.zai.callerid.data.CallLogRepo
 import com.zai.callerid.data.ContactEntry
 import com.zai.callerid.data.ContactsRepo
+import com.zai.callerid.data.NumberNote
 import com.zai.callerid.data.NumberUtils
+import com.zai.callerid.data.PrefixRule
+import com.zai.callerid.data.Prefs
 import com.zai.callerid.data.SpamDb
 import com.zai.callerid.data.SpamNumber
+import com.zai.callerid.data.SyncRepo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -150,9 +158,9 @@ fun CallerIdApp() {
     var tab by remember { mutableStateOf(0) }
     val tabIcons = listOf(
         Icons.Filled.Call, Icons.Filled.Person, Icons.Filled.Dialpad,
-        Icons.Filled.Warning, Icons.Filled.Settings
+        Icons.Filled.Warning, Icons.Filled.Settings, Icons.Filled.Settings
     )
-    val tabLabels = listOf("Recents", "Contacts", "Dialer", "Spam", "Setup")
+    val tabLabels = listOf("Recents", "Contacts", "Dialer", "Spam", "Notes", "Setup")
     MaterialTheme {
         Scaffold(
             bottomBar = {
@@ -177,6 +185,7 @@ fun CallerIdApp() {
                 1 -> ContactsScreen(mod)
                 2 -> DialPadScreen(mod)
                 3 -> SpamScreen(mod)
+                4 -> NotesScreen(mod)
                 else -> SetupScreen(mod)
             }
         }
@@ -214,7 +223,7 @@ fun RecentsScreen(modifier: Modifier = Modifier) {
             TextButton(onClick = { refresh++ }) { Text("Refresh") }
         }
         if (!hasCallLogPermission) {
-            Card(colors = CardDefaults.cardColors()) {
+            Card {
                 Text(
                     "Call log permission needed. Open Setup tab to grant it.",
                     Modifier.padding(14.dp),
@@ -397,10 +406,13 @@ fun DialPadScreen(modifier: Modifier = Modifier) {
 @Composable
 fun SpamScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val dao = remember { SpamDb.get(context).dao() }
+    val db = remember { SpamDb.get(context) }
     val scope = rememberCoroutineScope()
-    val spamList by dao.flowAll().collectAsState(initial = emptyList())
+    val spamList by db.dao().flowAll().collectAsState(initial = emptyList())
+    val prefixList by db.prefixDao().flowAll().collectAsState(initial = emptyList())
     var newNumber by remember { mutableStateOf("") }
+    var newPrefix by remember { mutableStateOf("") }
+    var newPrefixLabel by remember { mutableStateOf("") }
 
     Column(modifier) {
         Row(
@@ -426,7 +438,7 @@ fun SpamScreen(modifier: Modifier = Modifier) {
                     val key = NumberUtils.matchKey(newNumber)
                     if (key.isNotBlank()) {
                         scope.launch {
-                            dao.upsert(SpamNumber(number = key, label = "Added manually", blocked = true))
+                            db.dao().upsert(SpamNumber(number = key, label = "Added manually", blocked = true))
                         }
                         newNumber = ""
                     }
@@ -448,7 +460,7 @@ fun SpamScreen(modifier: Modifier = Modifier) {
                         .padding(vertical = 4.dp)
                 ) {
                     Row(
-                        Modifier.padding(12.dp),
+                        Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
@@ -467,12 +479,161 @@ fun SpamScreen(modifier: Modifier = Modifier) {
                         Switch(
                             checked = s.blocked,
                             onCheckedChange = { checked ->
-                                scope.launch {
-                                    dao.upsert(s.copy(blocked = checked))
-                                }
+                                scope.launch { db.dao().upsert(s.copy(blocked = checked)) }
                             }
                         )
-                        IconButton(onClick = { scope.launch { dao.delete(s.number) } }) {
+                        IconButton(onClick = { scope.launch { db.dao().delete(s.number) } }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                        }
+                    }
+                }
+            }
+
+            // ---- prefix rules section ----
+            item {
+                Spacer(Modifier.height(16.dp))
+                Text("Prefix rules", fontSize = 18.sp)
+                Text(
+                    "Reject every number starting with a prefix (e.g. +92 or 140).",
+                    fontSize = 12.sp, color = Color.Gray
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = newPrefix,
+                        onValueChange = { newPrefix = it },
+                        placeholder = { Text("Prefix") },
+                        singleLine = true,
+                        modifier = Modifier.width(110.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    OutlinedTextField(
+                        value = newPrefixLabel,
+                        onValueChange = { newPrefixLabel = it },
+                        placeholder = { Text("Label (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = {
+                        val p = newPrefix.trim()
+                        if (p.isNotBlank()) {
+                            scope.launch {
+                                db.prefixDao().upsert(
+                                    PrefixRule(
+                                        prefix = p,
+                                        label = newPrefixLabel.trim().ifBlank { "Prefix block" }
+                                    )
+                                )
+                            }
+                            newPrefix = ""
+                            newPrefixLabel = ""
+                        }
+                    }) { Text("Add") }
+                }
+            }
+            items(prefixList) { p ->
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(p.prefix, fontSize = 16.sp, color = Color(0xFFD32F2F))
+                            Text(p.label, fontSize = 12.sp, color = Color.Gray)
+                        }
+                        IconButton(onClick = { scope.launch { db.prefixDao().delete(p.prefix) } }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Notes (v1.2)
+
+@Composable
+fun NotesScreen(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val db = remember { SpamDb.get(context) }
+    val scope = rememberCoroutineScope()
+    val notes by db.notesDao().flowAll().collectAsState(initial = emptyList())
+    var number by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+
+    Column(modifier) {
+        Text(
+            "Personal notes",
+            fontSize = 22.sp,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+        Text(
+            "Private to you — shown in the caller ID popup when this number calls.",
+            fontSize = 12.sp, color = Color.Gray
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = number,
+            onValueChange = { number = it },
+            placeholder = { Text("Number e.g. 9876543210") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = note,
+            onValueChange = { note = it },
+            placeholder = { Text("Note e.g. Landlord, Car broker, IKEA delivery") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(6.dp))
+        FilledTonalButton(
+            onClick = {
+                val key = NumberUtils.matchKey(number)
+                if (key.isNotBlank() && note.isNotBlank()) {
+                    scope.launch {
+                        db.notesDao().upsert(NumberNote(number = key, note = note.trim()))
+                    }
+                    number = ""
+                    note = ""
+                }
+            },
+            modifier = Modifier.align(Alignment.End)
+        ) { Text("Save note") }
+        Spacer(Modifier.height(8.dp))
+        LazyColumn {
+            items(notes) { n ->
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(NumberUtils.normalize(n.number), fontSize = 16.sp)
+                            Text("📌 ${n.note}", fontSize = 13.sp, color = Color(0xFF1565C0))
+                        }
+                        IconButton(onClick = {
+                            DialerHelper.call(context, n.number)
+                        }) {
+                            Icon(
+                                Icons.Filled.Call,
+                                contentDescription = "Call",
+                                tint = Color(0xFF128C7E)
+                            )
+                        }
+                        IconButton(onClick = { scope.launch { db.notesDao().delete(n.number) } }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Delete")
                         }
                     }
@@ -488,8 +649,26 @@ fun SpamScreen(modifier: Modifier = Modifier) {
 fun SetupScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val activity = context as? MainActivity
+    val scope = rememberCoroutineScope()
     var tick by remember { mutableStateOf(0) }
     var permissions by remember { mutableStateOf(mapOf<String, Boolean>()) }
+
+    // silent hours state
+    var silentOn by remember { mutableStateOf(Prefs.silentEnabled(context)) }
+    var silentStart by remember { mutableStateOf(Prefs.silentStart(context).toString()) }
+    var silentEnd by remember { mutableStateOf(Prefs.silentEnd(context).toString()) }
+
+    // auto-reply state
+    var smsOn by remember { mutableStateOf(Prefs.smsEnabled(context)) }
+    var smsMessage by remember { mutableStateOf(Prefs.smsMessage(context)) }
+    val smsPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) { Prefs.setSmsEnabled(context, true); smsOn = true } }
+
+    // family sync state
+    var gistId by remember { mutableStateOf("") }
+    var gistToken by remember { mutableStateOf("") }
+    var syncStatus by remember { mutableStateOf("") }
 
     LaunchedEffect(tick) {
         delay(200)
@@ -510,6 +689,7 @@ fun SetupScreen(modifier: Modifier = Modifier) {
     Column(modifier.verticalScroll(rememberScrollState())) {
         Text("Setup & Permissions", fontSize = 22.sp, modifier = Modifier.padding(vertical = 8.dp))
 
+        // ---- core permissions ----
         Card(Modifier.padding(vertical = 6.dp)) {
             Column(Modifier.padding(14.dp)) {
                 Text("Core permissions", fontSize = 16.sp)
@@ -527,11 +707,12 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // ---- overlay ----
         Card(Modifier.padding(vertical = 6.dp)) {
             Column(Modifier.padding(14.dp)) {
                 Text("Floating caller ID popup", fontSize = 16.sp)
                 Text(
-                    "Show a Truecaller-style popup over incoming calls.",
+                    "Show a Truecaller-style popup (with your notes) over incoming calls.",
                     fontSize = 13.sp, color = Color.Gray
                 )
                 val canOverlay = Settings.canDrawOverlays(context)
@@ -547,11 +728,12 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // ---- call screening role ----
         Card(Modifier.padding(vertical = 6.dp)) {
             Column(Modifier.padding(14.dp)) {
                 Text("Auto-reject spam calls", fontSize = 16.sp)
                 Text(
-                    "Set this app as the Caller ID & spam app so spam numbers are rejected automatically.",
+                    "Set this app as the Caller ID & spam app so spam, prefix rules and silent hours reject automatically.",
                     fontSize = 13.sp, color = Color.Gray
                 )
                 val roleHeld = activity?.isCallScreeningRoleHeld() ?: false
@@ -572,14 +754,160 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // ---- silent hours (v1.2) ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🌙 Silent hours", fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = silentOn,
+                        onCheckedChange = {
+                            silentOn = it
+                            Prefs.setSilentEnabled(context, it)
+                        }
+                    )
+                }
+                Text(
+                    "Auto-reject ALL unknown numbers (not in contacts) during these hours.",
+                    fontSize = 13.sp, color = Color.Gray
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = silentStart,
+                        onValueChange = { silentStart = it.filter { c -> c.isDigit() }.take(2) },
+                        label = { Text("From (h)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.width(110.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    OutlinedTextField(
+                        value = silentEnd,
+                        onValueChange = { silentEnd = it.filter { c -> c.isDigit() }.take(2) },
+                        label = { Text("To (h)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.width(110.dp)
+                    )
+                    TextButton(onClick = {
+                        val s = silentStart.toIntOrNull()?.coerceIn(0, 23)
+                        val e = silentEnd.toIntOrNull()?.coerceIn(0, 23)
+                        if (s != null && e != null) {
+                            Prefs.setSilentHours(context, s, e)
+                            refresh()
+                        }
+                    }) { Text("Save hours") }
+                }
+            }
+        }
+
+        // ---- missed-call auto reply (v1.2) ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("💬 Missed-call auto-reply", fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = smsOn,
+                        onCheckedChange = { checked ->
+                            if (checked) {
+                                val granted = ContextCompat.checkSelfPermission(
+                                    context, Manifest.permission.SEND_SMS
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (granted) {
+                                    Prefs.setSmsEnabled(context, true)
+                                    smsOn = true
+                                } else {
+                                    smsPermLauncher.launch(Manifest.permission.SEND_SMS)
+                                }
+                            } else {
+                                Prefs.setSmsEnabled(context, false)
+                                smsOn = false
+                            }
+                        }
+                    )
+                }
+                Text(
+                    "Automatically texts \"I'll call you back\" when you miss a call (1 reply per number per hour). SMS charges may apply.",
+                    fontSize = 13.sp, color = Color.Gray
+                )
+                OutlinedTextField(
+                    value = smsMessage,
+                    onValueChange = {
+                        smsMessage = it
+                        Prefs.setSmsMessage(context, it)
+                    },
+                    label = { Text("Reply message") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+            }
+        }
+
+        // ---- family sync (v1.2) ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Text("👨‍👩‍👧 Family / friends shared spam list", fontSize = 16.sp)
+                Text(
+                    "Sync your blocklist with up to a few family members for free using a GitHub Gist as the backend.\n" +
+                        "1. Owner: create a (secret) gist at gist.github.com — its ID is the last part of the URL.\n" +
+                        "2. Paste the same Gist ID into everyone's app.\n" +
+                        "3. Push uploads your list, Pull merges the shared list into yours.\n" +
+                        "4. Push needs a GitHub token with gist scope (classic token works); Pull of public gists needs none.",
+                    fontSize = 12.sp, color = Color.Gray
+                )
+                OutlinedTextField(
+                    value = gistId,
+                    onValueChange = { gistId = it.trim() },
+                    label = { Text("Gist ID") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+                OutlinedTextField(
+                    value = gistToken,
+                    onValueChange = { gistToken = it.trim() },
+                    label = { Text("GitHub token (only needed to Push)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+                Row(modifier = Modifier.padding(top = 6.dp)) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            syncStatus = "Pulling…"
+                            val result = SyncRepo.pull(context, gistId, gistToken)
+                            withContext(Dispatchers.Main) { syncStatus = result }
+                        }
+                    }) { Text("Pull shared list") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            syncStatus = "Pushing…"
+                            val result = SyncRepo.push(context, gistId, gistToken)
+                            withContext(Dispatchers.Main) { syncStatus = result }
+                        }
+                    }) { Text("Push my list") }
+                }
+                if (syncStatus.isNotBlank()) {
+                    Text(syncStatus, fontSize = 13.sp)
+                }
+            }
+        }
+
+        // ---- how it works ----
         Card(Modifier.padding(vertical = 6.dp)) {
             Column(Modifier.padding(14.dp)) {
                 Text("How it works", fontSize = 16.sp)
                 Text(
                     "1. Tap Call anywhere in the app to dial a real number through your SIM.\n" +
-                        "2. When someone calls, a popup shows their name / spam verdict.\n" +
-                        "3. Numbers in your Spam list are rejected automatically.\n" +
-                        "4. Report spam from the Recents tab.",
+                        "2. When someone calls, a popup shows their name, your private note and spam verdict.\n" +
+                        "3. Numbers in your Spam list, matching prefix rules, or unknown calls during silent hours are rejected automatically.\n" +
+                        "4. Missed a call? The app can text back for you.\n" +
+                        "5. Report spam from the Recents tab; share it with family via the Gist sync.",
                     fontSize = 13.sp, color = Color.Gray
                 )
             }

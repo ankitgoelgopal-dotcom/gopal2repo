@@ -74,12 +74,15 @@ class OverlayService : Service() {
             val spam = if (key.isNotBlank()) {
                 SpamDb.get(appContext).dao().getByKeySync(key)
             } else null
+            val note = if (key.isNotBlank()) {
+                SpamDb.get(appContext).notesDao().getByKeySync(key)
+            } else null
             val name = if (rawNumber.isNotBlank()) ContactsRepo.nameFor(appContext, rawNumber) else null
-            withContext(Dispatchers.Main) { attachOverlay(rawNumber, name, spam) }
+            withContext(Dispatchers.Main) { attachOverlay(rawNumber, name, spam, note?.note) }
         }
     }
 
-    private fun attachOverlay(rawNumber: String, name: String?, spam: SpamNumber?) {
+    private fun attachOverlay(rawNumber: String, name: String?, spam: SpamNumber?, note: String?) {
         if (rootView != null) return
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         windowManager = wm
@@ -125,6 +128,15 @@ class OverlayService : Service() {
             setPadding(0, dp(4), 0, 0)
         }
         card.addView(subtitle)
+
+        if (!note.isNullOrBlank()) {
+            card.addView(TextView(ctx).apply {
+                text = "📌 $note"
+                setTextColor(0xFF1565C0.toInt())
+                textSize = 15f
+                setPadding(0, dp(4), 0, 0)
+            })
+        }
 
         card.addView(LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL

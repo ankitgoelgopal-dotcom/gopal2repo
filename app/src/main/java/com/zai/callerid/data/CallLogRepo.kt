@@ -52,4 +52,20 @@ object CallLogRepo {
         }
         return out
     }
+
+    /** Most recent missed-call number (fallback for auto-reply on API 31+). */
+    fun latestMissedNumber(context: Context): String? {
+        if (!hasPermission(context)) return null
+        return try {
+            context.contentResolver.query(
+                CallLog.Calls.CONTENT_URI,
+                arrayOf(CallLog.Calls.NUMBER),
+                CallLog.Calls.TYPE + "=?",
+                arrayOf(CallLog.Calls.MISSED_TYPE.toString()),
+                CallLog.Calls.DATE + " DESC"
+            )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        } catch (e: Exception) {
+            null
+        }
+    }
 }

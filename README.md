@@ -9,8 +9,13 @@ Jetpack Compose. Every push automatically builds an installable APK via GitHub A
 | Feature | How it works |
 |---|---|
 | 📞 Real calls | Dial pad + tap-to-call from recents/contacts — dials through your SIM via `TelecomManager.placeCall` |
-| 🪟 Caller ID popup | Floating overlay (Truecaller-style) over the incoming call screen with number, contact name and spam verdict |
+| 🪟 Caller ID popup | Floating overlay (Truecaller-style) over the incoming call screen with number, contact name, spam verdict **and your private note** |
 | 🚫 Auto-reject spam | Implements Android's `CallScreeningService`; numbers in your spam list are rejected automatically (set app as "Caller ID & spam app", Android 10+) |
+| 📝 Personal notes (v1.2) | Per-number private notes ("Landlord", "Car broker") shown in the popup — Truecaller can't do this |
+| 👨‍👩‍👧 Shared family blocklist (v1.2) | Sync your spam list with family via a GitHub Gist as a free backend — Push/Pull from the Setup tab |
+| 🌙 Silent hours (v1.2) | Auto-reject all unknown numbers during configurable hours (default 23:00–07:00) |
+| 🔤 Prefix rules (v1.2) | Reject every number starting with a prefix (e.g. `+92` or `140`) |
+| 💬 Missed-call auto-reply (v1.2) | Automatically SMS "I'll call you back" when you miss a call (1 reply/number/hour, configurable message) |
 | 📋 Recents | Reads the native call log, flags spam numbers in red, one-tap "Report spam" |
 | 👤 Contacts | Searchable contacts list with one-tap calling |
 | 🗄️ Spam list | Local Room database — add / block / unblock / delete numbers manually |
