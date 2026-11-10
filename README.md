@@ -21,6 +21,7 @@ Jetpack Compose. Every push automatically builds an installable APK via GitHub A
 | ⚠️ Spam beep (v1.3) | Short alert tone when a warn-only spam call rings through |
 | 🎵 Preset ringtones (v1.4) | Pick from all system ringtones/notifications/alarms with preview — no need to hunt for files |
 | 🌐 NumLookup caller ID (v1.4) | Identifies unknown callers automatically (carrier, country, line type) via the NumLookup API — results cached locally to save your free quota |
+| 📡 Internet calling for no-SIM phones (v1.5) | Wi-Fi/data app-to-app audio calls via LiveKit — both phones need the app + same LiveKit credentials. "No SIM detected" banner on Dialer offers "Start internet call" → share link → both join the same room |
 | 📋 Recents | Reads the native call log, flags spam numbers in red, one-tap "Report spam" |
 | 👤 Contacts | Searchable contacts list with one-tap calling |
 | 🗄️ Spam list | Local Room database — add / block / unblock / delete numbers manually |
