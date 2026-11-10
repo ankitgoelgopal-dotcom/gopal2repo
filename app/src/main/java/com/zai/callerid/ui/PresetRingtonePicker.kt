@@ -42,17 +42,23 @@ data class PresetTone(val title: String, val uri: Uri, val typeLabel: String)
 fun loadPresetTones(context: Context): List<PresetTone> {
     val out = mutableListOf<PresetTone>()
     val seenUris = mutableSetOf<String>()
+    // RingtoneManager requires an Activity; we use the simpler API on Context directly:
+    //   RingtoneManager(context).apply { setType(...) }.cursor
     listOf(
         RingtoneManager.TYPE_RINGTONE to "Ringtone",
         RingtoneManager.TYPE_NOTIFICATION to "Notification",
         RingtoneManager.TYPE_ALARM to "Alarm"
     ).forEach { (type, label) ->
         try {
-            val rm = RingtoneManager(context, type)
-            rm.cursor.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX) ?: continue
-                    val uri = rm.getRingtoneUri(cursor.position)
+            // Context-based constructor exists in API 23+; otherwise this throws
+            val rm = RingtoneManager(context)
+            rm.setType(type)
+            val cursor = rm.cursor
+            cursor.use { c ->
+                while (c.moveToNext()) {
+                    val pos = c.position
+                    val title = c.getString(RingtoneManager.TITLE_COLUMN_INDEX) ?: continue
+                    val uri = rm.getRingtoneUri(pos)
                     val uriStr = uri.toString()
                     if (seenUris.add(uriStr)) {
                         out += PresetTone(title, uri, label)
