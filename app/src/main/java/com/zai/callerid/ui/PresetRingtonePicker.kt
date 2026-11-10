@@ -41,38 +41,29 @@ data class PresetTone(val title: String, val uri: Uri, val typeLabel: String)
 /** Loads ringtones, alarms, and notifications in one list. */
 fun loadPresetTones(context: Context): List<PresetTone> {
     val out = mutableListOf<PresetTone>()
+    val seenUris = mutableSetOf<String>()
     listOf(
         RingtoneManager.TYPE_RINGTONE to "Ringtone",
         RingtoneManager.TYPE_NOTIFICATION to "Notification",
         RingtoneManager.TYPE_ALARM to "Alarm"
     ).forEach { (type, label) ->
         try {
-            RingtoneManager.getCursor(context).use { cursor ->
+            val rm = RingtoneManager(context, type)
+            rm.cursor.use { cursor ->
                 while (cursor.moveToNext()) {
                     val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX) ?: continue
-                    val uriStr = cursor.getString(RingtoneManager.URI_COLUMN_INDEX) ?: continue
-                    val idIdx = cursor.getColumnIndex(RingtoneManager.ID_COLUMN_INDEX)
-                    val id = if (idIdx >= 0) cursor.getString(idIdx) else null
-                    val uri = if (id != null) Uri.parse("$uriStr/$id") else Uri.parse(uriStr)
-                    out += PresetTone(title, uri, label)
+                    val uri = rm.getRingtoneUri(cursor.position)
+                    val uriStr = uri.toString()
+                    if (seenUris.add(uriStr)) {
+                        out += PresetTone(title, uri, label)
+                    }
                 }
             }
         } catch (_: Exception) {
             // skip unavailable types
         }
-        RingtoneManager.getCursor(context, type).use { cursor ->
-            while (cursor.moveToNext()) {
-                val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX) ?: continue
-                val uriStr = cursor.getString(RingtoneManager.URI_COLUMN_INDEX) ?: continue
-                val idIdx = cursor.getColumnIndex(RingtoneManager.ID_COLUMN_INDEX)
-                val id = if (idIdx >= 0) cursor.getString(idIdx) else null
-                val uri = if (id != null) Uri.parse("$uriStr/$id") else Uri.parse(uriStr)
-                out += PresetTone(title, uri, label)
-            }
-        }
     }
-    // dedupe by URI string
-    return out.distinctBy { it.uri.toString() }
+    return out
 }
 
 /**
