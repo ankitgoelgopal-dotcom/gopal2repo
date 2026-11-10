@@ -93,10 +93,14 @@ class CallMonitorService : Service() {
                 if (Settings.canDrawOverlays(this)) {
                     OverlayService.show(this, lastRingingNumber)
                 }
+                lastRingingNumber?.let {
+                    RingtonePlayer.playForIncoming(applicationContext, it)
+                }
             }
             TelephonyManager.CALL_STATE_OFFHOOK -> {
                 lastState = state
                 OverlayService.hide(this)
+                RingtonePlayer.stop()
             }
             TelephonyManager.CALL_STATE_IDLE -> {
                 // RINGING -> IDLE without OFFHOOK means the call was missed
@@ -105,6 +109,7 @@ class CallMonitorService : Service() {
                 }
                 lastState = state
                 OverlayService.hide(this)
+                RingtonePlayer.stop()
             }
         }
     }

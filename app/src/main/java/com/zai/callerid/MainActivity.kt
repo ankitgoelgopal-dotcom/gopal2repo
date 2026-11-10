@@ -1,6 +1,7 @@
 package com.zai.callerid
 
 import android.Manifest
+import android.app.NotificationManager
 import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -69,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.zai.callerid.call.CallMonitorService
 import com.zai.callerid.call.DialerHelper
+import com.zai.callerid.call.RingtonePlayer
 import com.zai.callerid.data.CallLogEntry
 import com.zai.callerid.data.CallLogRepo
 import com.zai.callerid.data.ContactEntry
@@ -150,6 +152,16 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
         val rm = getSystemService(RoleManager::class.java) ?: return false
         return rm.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
+    }
+
+    fun isDndAccessGranted(): Boolean {
+        val nm = getSystemService(NotificationManager::class.java) ?: return false
+        return nm.isNotificationPolicyAccessGranted
+    }
+
+    fun requestDndAccess() {
+        if (isDndAccessGranted()) return
+        settingsLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
     }
 }
 
@@ -557,7 +569,7 @@ fun SpamScreen(modifier: Modifier = Modifier) {
     }
 }
 
-// ---------------------------------------------------------------- Notes (v1.2)
+// ---------------------------------------------------------------- Notes (v1.2 → v1.3: category + ringtone)
 
 @Composable
 fun NotesScreen(modifier: Modifier = Modifier) {
@@ -567,6 +579,7 @@ fun NotesScreen(modifier: Modifier = Modifier) {
     val notes by db.notesDao().flowAll().collectAsState(initial = emptyList())
     var number by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("") }
 
     Column(modifier) {
         Text(
@@ -595,15 +608,30 @@ fun NotesScreen(modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = category,
+            onValueChange = { category = it },
+            placeholder = { Text("Category (optional) e.g. Family, Work, Delivery") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(6.dp))
         FilledTonalButton(
             onClick = {
                 val key = NumberUtils.matchKey(number)
                 if (key.isNotBlank() && note.isNotBlank()) {
                     scope.launch {
-                        db.notesDao().upsert(NumberNote(number = key, note = note.trim()))
+                        db.notesDao().upsert(
+                            NumberNote(
+                                number = key,
+                                note = note.trim(),
+                                category = category.trim()
+                            )
+                        )
                     }
                     number = ""
                     note = ""
+                    category = ""
                 }
             },
             modifier = Modifier.align(Alignment.End)
@@ -611,32 +639,86 @@ fun NotesScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(8.dp))
         LazyColumn {
             items(notes) { n ->
-                Card(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(NumberUtils.normalize(n.number), fontSize = 16.sp)
-                            Text("📌 ${n.note}", fontSize = 13.sp, color = Color(0xFF1565C0))
-                        }
-                        IconButton(onClick = {
-                            DialerHelper.call(context, n.number)
-                        }) {
-                            Icon(
-                                Icons.Filled.Call,
-                                contentDescription = "Call",
-                                tint = Color(0xFF128C7E)
-                            )
-                        }
-                        IconButton(onClick = { scope.launch { db.notesDao().delete(n.number) } }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Delete")
-                        }
+                NoteRow(n, db, scope, context)
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoteRow(
+    n: NumberNote,
+    db: SpamDb,
+    scope: kotlinx.coroutines.CoroutineScope,
+    context: android.content.Context
+) {
+    val pickRingtone = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                Prefs.setNumberRingtone(context, n.number, uri.toString())
+            } catch (_: SecurityException) {
+                // some URIs aren't persistable — fall back to storing without permission
+                Prefs.setNumberRingtone(context, n.number, uri.toString())
+            }
+        }
+    }
+
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(NumberUtils.normalize(n.number), fontSize = 16.sp)
+                    Text("📌 ${n.note}", fontSize = 13.sp, color = Color(0xFF1565C0))
+                    if (n.category.isNotBlank()) {
+                        Text(
+                            "🏷 ${n.category}",
+                            fontSize = 12.sp,
+                            color = Color(0xFF6A1B9A)
+                        )
                     }
+                    val ringUri = Prefs.numberRingtone(context, n.number)
+                    Text(
+                        if (ringUri != null) "🔔 Custom ringtone set" else "🔔 Default ringtone",
+                        fontSize = 11.sp,
+                        color = if (ringUri != null) Color(0xFF2E7D32) else Color.Gray
+                    )
+                }
+                IconButton(onClick = { DialerHelper.call(context, n.number) }) {
+                    Icon(
+                        Icons.Filled.Call,
+                        contentDescription = "Call",
+                        tint = Color(0xFF128C7E)
+                    )
+                }
+                IconButton(onClick = {
+                    pickRingtone.launch(arrayOf("audio/*"))
+                }) {
+                    Icon(Icons.Filled.Settings, contentDescription = "Set ringtone")
+                }
+                IconButton(onClick = { scope.launch { db.notesDao().delete(n.number) } }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                }
+            }
+            if (Prefs.numberRingtone(context, n.number) != null) {
+                Row {
+                    TextButton(onClick = {
+                        pickRingtone.launch(arrayOf("audio/*"))
+                    }) { Text("Change ringtone", fontSize = 12.sp) }
+                    TextButton(onClick = {
+                        Prefs.setNumberRingtone(context, n.number, null)
+                    }) { Text("Clear ringtone", fontSize = 12.sp) }
+                    TextButton(onClick = {
+                        RingtonePlayer.playForIncoming(context, n.number)
+                    }) { Text("Test", fontSize = 12.sp) }
                 }
             }
         }
@@ -670,7 +752,23 @@ fun SetupScreen(modifier: Modifier = Modifier) {
     var gistToken by remember { mutableStateOf("") }
     var syncStatus by remember { mutableStateOf("") }
 
-    LaunchedEffect(tick) {
+    // ringtone state (v1.3)
+    var spamBeepOn by remember { mutableStateOf(Prefs.spamBeepEnabled(context)) }
+    var categoryListTick by remember { mutableStateOf(0) }
+    val spamBeepPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) { }
+            Prefs.setSpamBeepUri(context, uri.toString())
+        }
+    }
+
+    LaunchedEffect(tick, categoryListTick) {
         delay(200)
         val wanted = listOf(
             Manifest.permission.READ_PHONE_STATE,
@@ -898,6 +996,110 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // ---- ringtones (v1.3) ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Text("🔔 Custom ringtones", fontSize = 16.sp)
+                Text(
+                    "Override the system ringtone with custom sounds. Per-number ringtones " +
+                        "are set on each note. Per-category ringtones apply to every note sharing that category.",
+                    fontSize = 13.sp, color = Color.Gray
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // spam beep
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Spam beep (warn-only)", fontSize = 14.sp)
+                        Text(
+                            "Plays a short alert tone when a spam call rings through " +
+                                "(spam numbers you set to \"warn only\").",
+                            fontSize = 12.sp, color = Color.Gray
+                        )
+                    }
+                    Switch(
+                        checked = spamBeepOn,
+                        onCheckedChange = {
+                            spamBeepOn = it
+                            Prefs.setSpamBeepEnabled(context, it)
+                        }
+                    )
+                }
+                Row {
+                    TextButton(onClick = { spamBeepPicker.launch(arrayOf("audio/*")) }) {
+                        Text(
+                            if (Prefs.spamBeepUri(context) != null)
+                                "Change spam beep sound"
+                            else "Pick spam beep sound (or use default)",
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (Prefs.spamBeepUri(context) != null) {
+                        TextButton(onClick = { Prefs.setSpamBeepUri(context, null) }) {
+                            Text("Reset to default", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                // per-category ringtones
+                Text("Per-category ringtones", fontSize = 14.sp)
+                Text(
+                    "Categories are auto-discovered from your notes. Pick a sound for each.",
+                    fontSize = 12.sp, color = Color.Gray
+                )
+                val notesForCats by remember {
+                    SpamDb.get(context).notesDao().flowAll()
+                }.collectAsState(initial = emptyList())
+                val categories = remember(notesForCats, categoryListTick) {
+                    val seen = mutableSetOf<String>()
+                    val cats = mutableListOf<String>()
+                    notesForCats.map { it.category }.filter { it.isNotBlank() }.forEach { c ->
+                        if (seen.add(c.lowercase())) cats.add(c)
+                    }
+                    Prefs.allCategories(context).forEach { c ->
+                        if (seen.add(c.lowercase())) cats.add(c)
+                    }
+                    cats
+                }
+                if (categories.isEmpty()) {
+                    Text(
+                        "No categories yet — set a category on any note and it will appear here.",
+                        fontSize = 12.sp, color = Color.Gray,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                categories.forEach { cat ->
+                    CategoryRingtoneRow(cat) { categoryListTick++ }
+                }
+            }
+        }
+
+        // ---- DND access (v1.3) ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Text("🌙 Do Not Disturb access (advanced)", fontSize = 16.sp)
+                Text(
+                    "Optional. Grants the app permission to read/change the Do Not Disturb mode — " +
+                        "useful if you later want the app to silence the system ringtone during spam calls " +
+                        "or auto-enable DND during silent hours.",
+                    fontSize = 13.sp, color = Color.Gray
+                )
+                val granted = activity?.isDndAccessGranted() ?: false
+                Text(
+                    if (granted) "✅ DND access granted" else "❌ DND access not granted",
+                    fontSize = 13.sp,
+                    color = if (granted) Color(0xFF2E7D32) else Color(0xFFD32F2F)
+                )
+                TextButton(onClick = {
+                    activity?.requestDndAccess()
+                    refresh()
+                }) { Text("Open DND access settings") }
+            }
+        }
+
         // ---- how it works ----
         Card(Modifier.padding(vertical = 6.dp)) {
             Column(Modifier.padding(14.dp)) {
@@ -913,6 +1115,51 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             }
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ---------------------------------------------------------------- category ringtone row (v1.3)
+
+@Composable
+fun CategoryRingtoneRow(category: String, onChanged: () -> Unit) {
+    val context = LocalContext.current
+    val pickRingtone = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) { }
+            Prefs.setCategoryRingtone(context, category, uri.toString())
+            onChanged()
+        }
+    }
+    val ringUri = Prefs.categoryRingtone(context, category)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("🏷 $category", fontSize = 13.sp)
+            Text(
+                if (ringUri != null) "Custom sound set" else "Default ringtone",
+                fontSize = 11.sp,
+                color = if (ringUri != null) Color(0xFF2E7D32) else Color.Gray
+            )
+        }
+        TextButton(onClick = { pickRingtone.launch(arrayOf("audio/*")) }) {
+            Text(if (ringUri != null) "Change" else "Pick sound", fontSize = 12.sp)
+        }
+        if (ringUri != null) {
+            TextButton(onClick = {
+                Prefs.setCategoryRingtone(context, category, null)
+                onChanged()
+            }) { Text("Clear", fontSize = 12.sp) }
+        }
     }
 }
 

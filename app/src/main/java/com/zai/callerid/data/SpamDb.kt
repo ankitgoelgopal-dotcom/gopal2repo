@@ -25,12 +25,14 @@ data class SpamNumber(
     val reportedAt: Long = System.currentTimeMillis()
 )
 
-// ---------------------------------------------------------------- personal notes (v1.2)
+// ---------------------------------------------------------------- personal notes (v1.2 → v1.3 with category)
 
 @Entity(tableName = "notes")
 data class NumberNote(
     @PrimaryKey val number: String,
     val note: String,
+    /** Optional category for per-category ringtone (v1.3). e.g. "Landlord", "Family". */
+    val category: String = "",
     val updatedAt: Long = System.currentTimeMillis()
 )
 
@@ -112,9 +114,15 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE notes ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 @Database(
     entities = [SpamNumber::class, NumberNote::class, PrefixRule::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class SpamDb : RoomDatabase() {
@@ -133,7 +141,7 @@ abstract class SpamDb : RoomDatabase() {
                     SpamDb::class.java,
                     "spam.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }

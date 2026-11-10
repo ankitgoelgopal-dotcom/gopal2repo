@@ -47,4 +47,47 @@ object Prefs {
 
     fun markSent(context: Context, key: String, at: Long = System.currentTimeMillis()) =
         sp(context).edit().putLong("sent_$key", at).apply()
+
+    // ---- ringtones (v1.3) ----
+    fun numberRingtone(context: Context, key: String): String? =
+        sp(context).getString("ring_number_$key", null)
+
+    fun setNumberRingtone(context: Context, key: String, uri: String?) {
+        val e = sp(context).edit()
+        if (uri.isNullOrBlank()) e.remove("ring_number_$key") else e.putString("ring_number_$key", uri)
+        e.apply()
+    }
+
+    fun categoryRingtone(context: Context, category: String): String? =
+        sp(context).getString("ring_cat_${category.lowercase()}", null)
+
+    fun setCategoryRingtone(context: Context, category: String, uri: String?) {
+        val e = sp(context).edit()
+        if (uri.isNullOrBlank() || category.isBlank()) {
+            e.remove("ring_cat_${category.lowercase()}")
+        } else {
+            e.putString("ring_cat_${category.lowercase()}", uri)
+        }
+        e.apply()
+    }
+
+    fun allCategories(context: Context): List<String> =
+        sp(context).all.keys
+            .filter { it.startsWith("ring_cat_") }
+            .map { it.removePrefix("ring_cat_") }
+
+    fun spamBeepEnabled(context: Context): Boolean =
+        sp(context).getBoolean("spam_beep_enabled", false)
+
+    fun setSpamBeepEnabled(context: Context, value: Boolean) =
+        sp(context).edit().putBoolean("spam_beep_enabled", value).apply()
+
+    fun spamBeepUri(context: Context): String? =
+        sp(context).getString("spam_beep_uri", null)
+
+    fun setSpamBeepUri(context: Context, uri: String?) {
+        val e = sp(context).edit()
+        if (uri.isNullOrBlank()) e.remove("spam_beep_uri") else e.putString("spam_beep_uri", uri)
+        e.apply()
+    }
 }
