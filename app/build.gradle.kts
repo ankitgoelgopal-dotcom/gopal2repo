@@ -81,7 +81,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     // LiveKit (v1.5): internet calling for SIM-less users
-    implementation("io.livekit:livekit-android:2.30.0")
+    implementation("io.livekit:livekit-android:2.26.1")
     // (JWT tokens are generated locally — see VoipToken.kt — to avoid pulling in the
     //  io.livekit:livekit-server-sdk which bundles protobuf classes that conflict
     //  with livekit-android's protobuf-javalite.)
