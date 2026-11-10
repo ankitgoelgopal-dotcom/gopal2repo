@@ -16,6 +16,11 @@ Jetpack Compose. Every push automatically builds an installable APK via GitHub A
 | 🌙 Silent hours (v1.2) | Auto-reject all unknown numbers during configurable hours (default 23:00–07:00) |
 | 🔤 Prefix rules (v1.2) | Reject every number starting with a prefix (e.g. `+92` or `140`) |
 | 💬 Missed-call auto-reply (v1.2) | Automatically SMS "I'll call you back" when you miss a call (1 reply/number/hour, configurable message) |
+| 🔔 Per-number ringtone (v1.3) | Set any audio file (or system preset) as the ringtone for a specific number |
+| 🏷 Per-category ringtone (v1.3) | Set a sound per category (Family, Work, Delivery…) — auto-applies to all notes in that category |
+| ⚠️ Spam beep (v1.3) | Short alert tone when a warn-only spam call rings through |
+| 🎵 Preset ringtones (v1.4) | Pick from all system ringtones/notifications/alarms with preview — no need to hunt for files |
+| 🌐 NumLookup caller ID (v1.4) | Identifies unknown callers automatically (carrier, country, line type) via the NumLookup API — results cached locally to save your free quota |
 | 📋 Recents | Reads the native call log, flags spam numbers in red, one-tap "Report spam" |
 | 👤 Contacts | Searchable contacts list with one-tap calling |
 | 🗄️ Spam list | Local Room database — add / block / unblock / delete numbers manually |

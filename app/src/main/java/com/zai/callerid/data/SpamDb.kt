@@ -45,6 +45,17 @@ data class PrefixRule(
     val label: String = "Prefix block"
 )
 
+// ---------------------------------------------------------------- lookup cache (v1.4)
+
+@Entity(tableName = "lookup_cache")
+data class LookupCache(
+    @PrimaryKey val number: String,
+    val country: String,
+    val carrier: String,
+    val lineType: String,
+    val cachedAt: Long = System.currentTimeMillis()
+)
+
 // ---------------------------------------------------------------- DAOs
 
 @Dao
@@ -96,6 +107,21 @@ interface PrefixDao {
     suspend fun delete(prefix: String)
 }
 
+@Dao
+interface LookupDao {
+    @Query("SELECT * FROM lookup_cache WHERE number = :key LIMIT 1")
+    fun getByKeySync(key: String): LookupCache?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entry: LookupCache)
+
+    @Query("DELETE FROM lookup_cache WHERE number = :key")
+    suspend fun delete(key: String)
+
+    @Query("DELETE FROM lookup_cache")
+    suspend fun clear()
+}
+
 // ---------------------------------------------------------------- database
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -120,15 +146,29 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS lookup_cache (" +
+                "number TEXT NOT NULL PRIMARY KEY, " +
+                "country TEXT NOT NULL, " +
+                "carrier TEXT NOT NULL, " +
+                "lineType TEXT NOT NULL, " +
+                "cachedAt INTEGER NOT NULL)"
+        )
+    }
+}
+
 @Database(
-    entities = [SpamNumber::class, NumberNote::class, PrefixRule::class],
-    version = 3,
+    entities = [SpamNumber::class, NumberNote::class, PrefixRule::class, LookupCache::class],
+    version = 4,
     exportSchema = false
 )
 abstract class SpamDb : RoomDatabase() {
     abstract fun dao(): SpamDao
     abstract fun notesDao(): NotesDao
     abstract fun prefixDao(): PrefixDao
+    abstract fun lookupDao(): LookupDao
 
     companion object {
         @Volatile
@@ -141,7 +181,7 @@ abstract class SpamDb : RoomDatabase() {
                     SpamDb::class.java,
                     "spam.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }

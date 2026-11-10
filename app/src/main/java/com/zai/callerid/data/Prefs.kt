@@ -90,4 +90,17 @@ object Prefs {
         if (uri.isNullOrBlank()) e.remove("spam_beep_uri") else e.putString("spam_beep_uri", uri)
         e.apply()
     }
+
+    // ---- NumLookup API (v1.4) ----
+    fun numLookupApiKey(context: Context): String =
+        sp(context).getString("numlookup_key", "") ?: ""
+
+    fun setNumLookupApiKey(context: Context, value: String) =
+        sp(context).edit().putString("numlookup_key", value.trim()).apply()
+
+    fun numLookupEnabled(context: Context): Boolean =
+        sp(context).getBoolean("numlookup_enabled", false)
+
+    fun setNumLookupEnabled(context: Context, value: Boolean) =
+        sp(context).edit().putBoolean("numlookup_enabled", value).apply()
 }

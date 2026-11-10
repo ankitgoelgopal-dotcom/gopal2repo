@@ -18,7 +18,10 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.zai.callerid.data.ContactsRepo
+import com.zai.callerid.data.LookupCache
+import com.zai.callerid.data.NumLookupApi
 import com.zai.callerid.data.NumberUtils
+import com.zai.callerid.data.Prefs
 import com.zai.callerid.data.SpamDb
 import com.zai.callerid.data.SpamNumber
 import kotlinx.coroutines.CoroutineScope
@@ -78,11 +81,36 @@ class OverlayService : Service() {
                 SpamDb.get(appContext).notesDao().getByKeySync(key)
             } else null
             val name = if (rawNumber.isNotBlank()) ContactsRepo.nameFor(appContext, rawNumber) else null
-            withContext(Dispatchers.Main) { attachOverlay(rawNumber, name, spam, note?.note) }
+
+            // NumLookup (v1.4): only fetch if caller is unknown and feature is enabled
+            var lookup: LookupCache? = null
+            if (name == null && key.isNotBlank() && Prefs.numLookupEnabled(appContext) &&
+                Prefs.numLookupApiKey(appContext).isNotBlank()
+            ) {
+                val db = SpamDb.get(appContext)
+                val cached = db.lookupDao().getByKeySync(key)
+                if (cached != null) {
+                    lookup = cached
+                } else {
+                    val fresh = NumLookupApi.lookup(appContext, rawNumber)
+                    if (fresh != null) {
+                        val entry = LookupCache(
+                            number = key,
+                            country = fresh.countryName,
+                            carrier = fresh.carrier,
+                            lineType = fresh.lineType
+                        )
+                        db.lookupDao().upsert(entry)
+                        lookup = entry
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) { attachOverlay(rawNumber, name, spam, note?.note, lookup) }
         }
     }
 
-    private fun attachOverlay(rawNumber: String, name: String?, spam: SpamNumber?, note: String?) {
+    private fun attachOverlay(rawNumber: String, name: String?, spam: SpamNumber?, note: String?, lookup: LookupCache?) {
         if (rootView != null) return
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         windowManager = wm
@@ -135,6 +163,15 @@ class OverlayService : Service() {
                 setTextColor(0xFF1565C0.toInt())
                 textSize = 15f
                 setPadding(0, dp(4), 0, 0)
+            })
+        }
+
+        if (lookup != null && (lookup.carrier.isNotBlank() || lookup.country.isNotBlank())) {
+            card.addView(TextView(ctx).apply {
+                text = "🌐 ${lookup.country}${if (lookup.carrier.isNotBlank()) " • ${lookup.carrier}" else ""}${if (lookup.lineType.isNotBlank()) " • ${lookup.lineType}" else ""}"
+                setTextColor(0xFF555555.toInt())
+                textSize = 13f
+                setPadding(0, dp(2), 0, 0)
             })
         }
 

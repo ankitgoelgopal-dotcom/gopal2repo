@@ -65,6 +65,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import com.zai.callerid.ui.PresetRingtonePicker
+import android.media.RingtoneManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -660,13 +662,11 @@ private fun NoteRow(
                 context.contentResolver.takePersistableUriPermission(
                     uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-                Prefs.setNumberRingtone(context, n.number, uri.toString())
-            } catch (_: SecurityException) {
-                // some URIs aren't persistable — fall back to storing without permission
-                Prefs.setNumberRingtone(context, n.number, uri.toString())
-            }
+            } catch (_: SecurityException) { }
+            Prefs.setNumberRingtone(context, n.number, uri.toString())
         }
     }
+    var showPreset by remember { mutableStateOf(false) }
 
     Card(
         Modifier
@@ -702,26 +702,40 @@ private fun NoteRow(
                 IconButton(onClick = {
                     pickRingtone.launch(arrayOf("audio/*"))
                 }) {
-                    Icon(Icons.Filled.Settings, contentDescription = "Set ringtone")
+                    Icon(Icons.Filled.Settings, contentDescription = "Set ringtone from file")
                 }
                 IconButton(onClick = { scope.launch { db.notesDao().delete(n.number) } }) {
                     Icon(Icons.Filled.Delete, contentDescription = "Delete")
                 }
             }
-            if (Prefs.numberRingtone(context, n.number) != null) {
-                Row {
-                    TextButton(onClick = {
-                        pickRingtone.launch(arrayOf("audio/*"))
-                    }) { Text("Change ringtone", fontSize = 12.sp) }
+            Row {
+                TextButton(onClick = {
+                    pickRingtone.launch(arrayOf("audio/*"))
+                }) { Text(if (Prefs.numberRingtone(context, n.number) != null) "Change file" else "From file", fontSize = 12.sp) }
+                TextButton(onClick = { showPreset = true }) {
+                    Text("Preset…", fontSize = 12.sp)
+                }
+                if (Prefs.numberRingtone(context, n.number) != null) {
                     TextButton(onClick = {
                         Prefs.setNumberRingtone(context, n.number, null)
-                    }) { Text("Clear ringtone", fontSize = 12.sp) }
+                    }) { Text("Clear", fontSize = 12.sp) }
                     TextButton(onClick = {
                         RingtonePlayer.playForIncoming(context, n.number)
                     }) { Text("Test", fontSize = 12.sp) }
                 }
             }
         }
+    }
+    if (showPreset) {
+        PresetRingtonePicker(
+            context = context,
+            title = "Pick a ringtone for ${n.note}",
+            onPick = { uri ->
+                Prefs.setNumberRingtone(context, n.number, uri.toString())
+                showPreset = false
+            },
+            onDismiss = { showPreset = false }
+        )
     }
 }
 
@@ -767,6 +781,10 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             Prefs.setSpamBeepUri(context, uri.toString())
         }
     }
+
+    // NumLookup state (v1.4)
+    var numLookupOn by remember { mutableStateOf(Prefs.numLookupEnabled(context)) }
+    var numLookupKey by remember { mutableStateOf(Prefs.numLookupApiKey(context)) }
 
     LaunchedEffect(tick, categoryListTick) {
         delay(200)
@@ -996,6 +1014,66 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // ---- NumLookup API (v1.4) ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🌐 Caller ID via NumLookup API", fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = numLookupOn,
+                        onCheckedChange = {
+                            numLookupOn = it
+                            Prefs.setNumLookupEnabled(context, it)
+                        }
+                    )
+                }
+                Text(
+                    "Identifies unknown callers automatically (carrier, country, line type) " +
+                        "using the NumLookup API. Free tier: ~100 lookups/month. Sign up at " +
+                        "numlookupapi.com → paste your API key below.\n" +
+                        "Lookups are cached locally so repeat callers don't burn your quota.",
+                    fontSize = 12.sp, color = Color.Gray
+                )
+                OutlinedTextField(
+                    value = numLookupKey,
+                    onValueChange = {
+                        numLookupKey = it
+                        Prefs.setNumLookupApiKey(context, it)
+                    },
+                    label = { Text("NumLookup API key") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+                var testNumber by remember { mutableStateOf("") }
+                var testResult by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = testNumber,
+                    onValueChange = { testNumber = it },
+                    label = { Text("Test a number e.g. 9876543210") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+                Row {
+                    TextButton(onClick = {
+                        scope.launch {
+                            testResult = "Looking up…"
+                            val r = com.zai.callerid.data.NumLookupApi.lookup(context, testNumber)
+                            testResult = if (r != null) "✅ ${r.short()}" else "❌ Failed (check API key + number)"
+                        }
+                    }) { Text("Test lookup") }
+                    if (testResult.isNotBlank()) {
+                        Text(testResult, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
+                    }
+                }
+            }
+        }
+
         // ---- ringtones (v1.3) ----
         Card(Modifier.padding(vertical = 6.dp)) {
             Column(Modifier.padding(14.dp)) {
@@ -1040,6 +1118,21 @@ fun SetupScreen(modifier: Modifier = Modifier) {
                             Text("Reset to default", fontSize = 12.sp)
                         }
                     }
+                }
+                var showSpamBeepPreset by remember { mutableStateOf(false) }
+                TextButton(onClick = { showSpamBeepPreset = true }) {
+                    Text("Or pick from presets…", fontSize = 12.sp)
+                }
+                if (showSpamBeepPreset) {
+                    PresetRingtonePicker(
+                        context = context,
+                        title = "Pick spam beep sound",
+                        onPick = { uri ->
+                            Prefs.setSpamBeepUri(context, uri.toString())
+                            showSpamBeepPreset = false
+                        },
+                        onDismiss = { showSpamBeepPreset = false }
+                    )
                 }
 
                 Spacer(Modifier.height(10.dp))
@@ -1136,6 +1229,7 @@ fun CategoryRingtoneRow(category: String, onChanged: () -> Unit) {
             onChanged()
         }
     }
+    var showPreset by remember { mutableStateOf(false) }
     val ringUri = Prefs.categoryRingtone(context, category)
     Row(
         Modifier
@@ -1152,7 +1246,10 @@ fun CategoryRingtoneRow(category: String, onChanged: () -> Unit) {
             )
         }
         TextButton(onClick = { pickRingtone.launch(arrayOf("audio/*")) }) {
-            Text(if (ringUri != null) "Change" else "Pick sound", fontSize = 12.sp)
+            Text("File", fontSize = 12.sp)
+        }
+        TextButton(onClick = { showPreset = true }) {
+            Text("Preset", fontSize = 12.sp)
         }
         if (ringUri != null) {
             TextButton(onClick = {
@@ -1160,6 +1257,18 @@ fun CategoryRingtoneRow(category: String, onChanged: () -> Unit) {
                 onChanged()
             }) { Text("Clear", fontSize = 12.sp) }
         }
+    }
+    if (showPreset) {
+        PresetRingtonePicker(
+            context = context,
+            title = "Pick sound for $category",
+            onPick = { uri ->
+                Prefs.setCategoryRingtone(context, category, uri.toString())
+                onChanged()
+                showPreset = false
+            },
+            onDismiss = { showPreset = false }
+        )
     }
 }
 
