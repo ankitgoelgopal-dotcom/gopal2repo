@@ -103,4 +103,34 @@ object Prefs {
 
     fun setNumLookupEnabled(context: Context, value: Boolean) =
         sp(context).edit().putBoolean("numlookup_enabled", value).apply()
+
+    // ---- LiveKit internet calling (v1.5) ----
+    fun livekitUrl(context: Context): String =
+        sp(context).getString("livekit_url", "wss://your-project.livekit.cloud") ?: ""
+
+    fun setLivekitUrl(context: Context, value: String) =
+        sp(context).edit().putString("livekit_url", value.trim()).apply()
+
+    fun livekitApiKey(context: Context): String =
+        sp(context).getString("livekit_key", "") ?: ""
+
+    fun setLivekitApiKey(context: Context, value: String) =
+        sp(context).edit().putString("livekit_key", value.trim()).apply()
+
+    fun livekitSecret(context: Context): String =
+        sp(context).getString("livekit_secret", "") ?: ""
+
+    fun setLivekitSecret(context: Context, value: String) =
+        sp(context).edit().putString("livekit_secret", value.trim()).apply()
+
+    fun livekitIdentity(context: Context): String =
+        sp(context).getString("livekit_identity", "") ?: ""
+
+    fun setLivekitIdentity(context: Context, value: String) =
+        sp(context).edit().putString("livekit_identity", value.trim().ifBlank { "user" + (1000..9999).random() }).apply()
+
+    fun livekitReady(context: Context): Boolean =
+        livekitUrl(context).startsWith("wss://") &&
+            livekitApiKey(context).isNotBlank() &&
+            livekitSecret(context).isNotBlank()
 }

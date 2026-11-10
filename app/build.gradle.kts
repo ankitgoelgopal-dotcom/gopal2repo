@@ -32,8 +32,8 @@ android {
         applicationId = "com.zai.callerid"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     buildTypes {
@@ -79,5 +79,10 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
+
+    // LiveKit (v1.5): internet calling for SIM-less users
+    implementation("io.livekit:livekit-android:2.30.0")
+    implementation("io.livekit:livekit-server-sdk:0.6.0")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

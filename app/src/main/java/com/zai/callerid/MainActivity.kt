@@ -37,7 +37,9 @@ import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -62,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,9 +84,11 @@ import com.zai.callerid.data.NumberNote
 import com.zai.callerid.data.NumberUtils
 import com.zai.callerid.data.PrefixRule
 import com.zai.callerid.data.Prefs
+import com.zai.callerid.data.SimDetector
 import com.zai.callerid.data.SpamDb
 import com.zai.callerid.data.SpamNumber
 import com.zai.callerid.data.SyncRepo
+import com.zai.callerid.voip.VoipCallActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -108,6 +113,23 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent { CallerIdApp() }
         requestCorePermissions()
+        handleDeepLink(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    /** If launched from a callerid://call/<roomId> link, jump straight into the VoIP call as guest. */
+    private fun handleDeepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme == "callerid" && data.host == "call") {
+            val roomName = data.lastPathSegment ?: return
+            if (roomName.isNotBlank()) {
+                VoipCallActivity.start(this, roomName, asHost = false)
+            }
+        }
     }
 
     private fun requestCorePermissions() {
@@ -351,7 +373,10 @@ fun ContactsScreen(modifier: Modifier = Modifier) {
 @Composable
 fun DialPadScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var number by remember { mutableStateOf("") }
+    var showInternetCallDialog by remember { mutableStateOf(false) }
+    val simState = remember { SimDetector.state(context) }
     val keys = listOf(
         listOf("1", "2", "3"),
         listOf("4", "5", "6"),
@@ -364,6 +389,46 @@ fun DialPadScreen(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        // ---- No SIM banner (v1.5) ----
+        if (simState != SimDetector.SimState.ACTIVE) {
+            Card(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFFFFF3E0)
+                )
+            ) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Text(
+                        when (simState) {
+                            SimDetector.SimState.ABSENT -> "📵 No SIM card detected"
+                            SimDetector.SimState.UNKNOWN -> "📵 SIM not ready"
+                            else -> "📵 No SIM card detected"
+                        },
+                        fontSize = 14.sp,
+                        color = Color(0xFFE65100)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Cellular calls won't work. You can still call other people over Wi-Fi/data " +
+                            "(both of you need this app + LiveKit configured in Setup).",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    FilledTonalButton(
+                        onClick = { showInternetCallDialog = true }
+                    ) {
+                        Icon(Icons.Filled.Call, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Start internet call", fontSize = 13.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
         Spacer(Modifier.weight(1f))
         Text(
             number.ifBlank { "Enter number" },
@@ -413,9 +478,98 @@ fun DialPadScreen(modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.weight(1f))
     }
+
+    if (showInternetCallDialog) {
+        InternetCallDialog(
+            onDismiss = { showInternetCallDialog = false },
+            onStart = { roomName ->
+                showInternetCallDialog = false
+                VoipCallActivity.start(context, roomName, asHost = true)
+            }
+        )
+    }
 }
 
-// ---------------------------------------------------------------- Spam
+@Composable
+fun InternetCallDialog(
+    onDismiss: () -> Unit,
+    onStart: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val roomId = remember {
+        // 8-char random room ID, no ambiguous chars
+        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        (1..8).map { alphabet.random() }.joinToString("")
+    }
+    val link = "callerid://call/$roomId"
+    val ready = Prefs.livekitReady(context)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Internet call (no SIM needed)") },
+        text = {
+            Column {
+                if (!ready) {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFFFEBEE)
+                        )
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("⚠ LiveKit not configured", color = Color(0xFFC62828), fontSize = 14.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Open Setup → \"Internet calling (no SIM)\" and paste your LiveKit URL, API key and secret. " +
+                                    "Both phones need the same credentials to call each other.",
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                Text("Room ID:", fontSize = 13.sp, color = Color.Gray)
+                Text(roomId, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Shareable link:", fontSize = 13.sp, color = Color.Gray)
+                Text(
+                    link,
+                    fontSize = 13.sp,
+                    color = Color(0xFF128C7E),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Send this link to anyone with the app installed. Tap \"Share\" to send via any messaging app, " +
+                        "or \"Start call\" to begin now (they'll join when they tap the link).",
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = {
+                    val share = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, "Call me on TrueCall ID: $link")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(Intent.createChooser(share, "Share call link").apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    })
+                }) { Text("Share link") }
+                Spacer(Modifier.width(4.dp))
+                FilledTonalButton(onClick = { onStart(roomId) }) {
+                    Text(if (ready) "Start call" else "Start anyway")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
 
 @Composable
 fun SpamScreen(modifier: Modifier = Modifier) {
@@ -786,6 +940,12 @@ fun SetupScreen(modifier: Modifier = Modifier) {
     var numLookupOn by remember { mutableStateOf(Prefs.numLookupEnabled(context)) }
     var numLookupKey by remember { mutableStateOf(Prefs.numLookupApiKey(context)) }
 
+    // LiveKit state (v1.5)
+    var livekitUrl by remember { mutableStateOf(Prefs.livekitUrl(context)) }
+    var livekitKey by remember { mutableStateOf(Prefs.livekitApiKey(context)) }
+    var livekitSecret by remember { mutableStateOf(Prefs.livekitSecret(context)) }
+    var livekitIdentity by remember { mutableStateOf(Prefs.livekitIdentity(context)) }
+
     LaunchedEffect(tick, categoryListTick) {
         delay(200)
         val wanted = listOf(
@@ -1071,6 +1231,82 @@ fun SetupScreen(modifier: Modifier = Modifier) {
                         Text(testResult, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
                     }
                 }
+            }
+        }
+
+        // ---- Internet calling (v1.5) ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                Text("📡 Internet calling (no SIM)", fontSize = 16.sp)
+                Text(
+                    "Call other people over Wi-Fi/data — both of you need this app + the same LiveKit " +
+                        "credentials. Sign up free at livekit.io (10,000 minutes/month free) and paste " +
+                        "your project URL, API key and secret below.",
+                    fontSize = 12.sp, color = Color.Gray
+                )
+                val ready = Prefs.livekitReady(context)
+                Text(
+                    if (ready) "✅ LiveKit configured" else "❌ LiveKit not configured",
+                    fontSize = 13.sp,
+                    color = if (ready) Color(0xFF2E7D32) else Color(0xFFD32F2F),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                OutlinedTextField(
+                    value = livekitUrl,
+                    onValueChange = {
+                        livekitUrl = it
+                        Prefs.setLivekitUrl(context, it)
+                    },
+                    label = { Text("LiveKit URL (wss://...)") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+                OutlinedTextField(
+                    value = livekitKey,
+                    onValueChange = {
+                        livekitKey = it
+                        Prefs.setLivekitApiKey(context, it)
+                    },
+                    label = { Text("API key") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+                OutlinedTextField(
+                    value = livekitSecret,
+                    onValueChange = {
+                        livekitSecret = it
+                        Prefs.setLivekitSecret(context, it)
+                    },
+                    label = { Text("API secret") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+                OutlinedTextField(
+                    value = livekitIdentity,
+                    onValueChange = {
+                        livekitIdentity = it
+                        Prefs.setLivekitIdentity(context, it)
+                    },
+                    label = { Text("Your display name (optional)") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                )
+                Text(
+                    "How to call: open the Dialer tab → tap \"Start internet call\" → share the link with " +
+                        "anyone who has the app. When they tap the link, both of you join the same call.",
+                    fontSize = 12.sp, color = Color.Gray,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
             }
         }
 
