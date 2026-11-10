@@ -82,7 +82,7 @@ dependencies {
 
     // LiveKit (v1.5): internet calling for SIM-less users
     implementation("io.livekit:livekit-android:2.30.0")
-    implementation("io.livekit:livekit-server-sdk:0.6.0")
+    implementation("io.livekit:livekit-server:0.8.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
