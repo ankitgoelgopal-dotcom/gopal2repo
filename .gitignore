@@ -10,3 +10,8 @@ captures/
 *.apk
 *.aab
 !app/build/outputs/apk/debug/app-debug.apk
+
+# Signing material - never commit
+keystore.properties
+*.jks
+*.keystore

@@ -28,8 +28,8 @@ Jetpack Compose. Every push automatically builds an installable APK via GitHub A
 
 ## Install
 
-1. Go to the **Actions** tab → latest run → download artifact **TrueCallID-debug-apk**
-2. Copy `app-debug.apk` to your phone and install it (allow "install unknown apps")
+1. Go to the **Actions** tab → latest run → download artifact **TrueCallID-release-apk (or TrueCallID-debug-apk if signing secrets are not set)**
+2. Copy the `.apk` to your phone and install it (allow "install unknown apps")
 3. Open the app → **Setup tab**:
    - Grant phone / call log / contacts / call permissions
    - Enable **"Display over other apps"** (for the popup)
@@ -60,7 +60,7 @@ app/src/main/java/com/zai/callerid/
   `OverlayService.lookupAndShow()` / `SpamScreeningService` for remote lookups.
 - Incoming-call **numbers** on Android 12+ are only guaranteed via the
   CallScreeningService role — without the role the popup may show "Unknown number".
-- Debug APK (signed with debug key). For Play Store you'd add a release signing config.
+- Release signing uses GitHub Actions secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD). Without them, CI builds a debug APK.
 
 ## Build
 

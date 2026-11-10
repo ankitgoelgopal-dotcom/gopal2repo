@@ -25,12 +25,48 @@ jobs:
         with:
           gradle-version: '8.5'
 
+      - name: Prepare release signing (from GitHub secrets)
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "storeFile=$RUNNER_TEMP/release.jks"
+              echo "storePassword=$KEYSTORE_PASSWORD"
+              echo "keyAlias=$KEY_ALIAS"
+              echo "keyPassword=$KEY_PASSWORD"
+            } > keystore.properties
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No signing secrets found - building debug APK instead."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build release APK (signed)
+        if: steps.signing.outputs.release == 'true'
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Upload APK artifact
+      - name: Build debug APK (fallback)
+        if: steps.signing.outputs.release != 'true'
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload release APK
+        if: steps.signing.outputs.release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: TrueCallID-release-apk
           path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload debug APK
+        if: steps.signing.outputs.release != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrueCallID-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
