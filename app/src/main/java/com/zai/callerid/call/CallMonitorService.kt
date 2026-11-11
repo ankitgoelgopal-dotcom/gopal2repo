@@ -90,11 +90,14 @@ class CallMonitorService : Service() {
                 lastState = state
                 lastRingingNumber =
                     phoneNumber?.takeIf { it.isNotBlank() } ?: IncomingHolder.fresh()
-                if (Settings.canDrawOverlays(this)) {
-                    OverlayService.show(this, lastRingingNumber)
-                }
-                lastRingingNumber?.let {
-                    RingtonePlayer.playForIncoming(applicationContext, it)
+                // As default phone app our own call screen + the system ringtone handle this
+                if (!CallManager.isDefaultDialer(this)) {
+                    if (Settings.canDrawOverlays(this)) {
+                        OverlayService.show(this, lastRingingNumber)
+                    }
+                    lastRingingNumber?.let {
+                        RingtonePlayer.playForIncoming(applicationContext, it)
+                    }
                 }
             }
             TelephonyManager.CALL_STATE_OFFHOOK -> {

@@ -176,6 +176,22 @@ class MainActivity : ComponentActivity() {
 
     fun requestCorePermissionsFromUi() = requestCorePermissions()
 
+    private val dialerRoleLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { }
+
+    /** Opens Android's "Set as default phone app" prompt. */
+    fun requestDefaultDialer() {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val rm = getSystemService(android.app.role.RoleManager::class.java)
+            rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
+        } else {
+            Intent(android.telecom.TelecomManager.ACTION_CHANGE_DEFAULT_DIALER)
+                .putExtra(android.telecom.TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, packageName)
+        }
+        dialerRoleLauncher.launch(intent)
+    }
+
     fun openOverlaySettings() {
         settingsLauncher.launch(
             Intent(
@@ -400,7 +416,10 @@ fun ContactsScreen(modifier: Modifier = Modifier) {
 fun DialPadScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var number by remember { mutableStateOf("") }
+    var number by remember { mutableStateOf(com.zai.callerid.call.DialPrefill.take() ?: "") }
+    LaunchedEffect(com.zai.callerid.call.DialPrefill.version) {
+        com.zai.callerid.call.DialPrefill.take()?.let { number = it }
+    }
     var showInternetCallDialog by remember { mutableStateOf(false) }
     val simState = remember { SimDetector.state(context) }
     val keys = listOf(
@@ -990,6 +1009,27 @@ fun SetupScreen(modifier: Modifier = Modifier) {
 
     Column(modifier.verticalScroll(rememberScrollState())) {
         Text("Setup & Permissions", fontSize = 22.sp, modifier = Modifier.padding(vertical = 8.dp))
+
+        // ---- default phone app ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                val isDefault = com.zai.callerid.call.CallManager.isDefaultDialer(context)
+                Text("Default phone app", fontSize = 16.sp)
+                Text(
+                    if (isDefault) "✅ TrueCall ID is your default phone app. Calls use its own call screen."
+                    else "Set TrueCall ID as the default phone app to make and receive calls with its own screen " +
+                        "instead of the system dialer.",
+                    fontSize = 13.sp
+                )
+                if (!isDefault) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = {
+                        (context as? MainActivity)?.requestDefaultDialer()
+                        refresh()
+                    }) { Text("Set as default phone app") }
+                }
+            }
+        }
 
         // ---- core permissions ----
         Card(Modifier.padding(vertical = 6.dp)) {
