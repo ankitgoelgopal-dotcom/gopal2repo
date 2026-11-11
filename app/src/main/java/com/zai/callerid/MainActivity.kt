@@ -108,6 +108,32 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { }
 
+    private var pendingCallNumber: String? = null
+
+    private val callPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val number = pendingCallNumber
+        pendingCallNumber = null
+        if (number != null) {
+            if (!granted) {
+                android.widget.Toast.makeText(
+                    this,
+                    "Allow Phone permission (App info > Permissions) to call directly",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+            // Places the call directly if granted, otherwise falls back to the dialer
+            DialerHelper.call(this, number, askPermission = false)
+        }
+    }
+
+    /** Ask for CALL_PHONE, then dial straight from the app. */
+    fun requestCallPermissionAndDial(number: String) {
+        pendingCallNumber = number
+        callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
