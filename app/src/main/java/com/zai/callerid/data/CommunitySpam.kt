@@ -65,7 +65,10 @@ object CommunitySpam {
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("apikey", BuildConfig.SPAM_API_KEY)
-            conn.setRequestProperty("Authorization", "Bearer ${BuildConfig.SPAM_API_KEY}")
+            // Old-style anon keys are JWTs (eyJ...) and go in Authorization too; new sb_publishable_ keys only in apikey
+            if (BuildConfig.SPAM_API_KEY.startsWith("eyJ")) {
+                conn.setRequestProperty("Authorization", "Bearer ${BuildConfig.SPAM_API_KEY}")
+            }
             conn.outputStream.use { it.write(body.toString().toByteArray()) }
             val code = conn.responseCode
             if (code !in 200..299) null else conn.inputStream.bufferedReader().readText()
