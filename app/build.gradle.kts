@@ -29,6 +29,10 @@ android {
     }
 
     defaultConfig {
+        val spamUrl = (project.findProperty("spamApiUrl") as String?) ?: System.getenv("SPAM_API_URL") ?: ""
+        val spamKey = (project.findProperty("spamApiKey") as String?) ?: System.getenv("SPAM_API_KEY") ?: ""
+        buildConfigField("String", "SPAM_API_URL", "\"$spamUrl\"")
+        buildConfigField("String", "SPAM_API_KEY", "\"$spamKey\"")
         applicationId = "com.zai.callerid"
         minSdk = 26
         targetSdk = 34
@@ -57,6 +61,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"

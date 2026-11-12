@@ -23,6 +23,8 @@ import com.zai.callerid.data.NumLookupApi
 import com.zai.callerid.data.NumberUtils
 import com.zai.callerid.data.Prefs
 import com.zai.callerid.data.SpamDb
+import com.zai.callerid.data.SpamLevel
+import com.zai.callerid.data.SpamScore
 import com.zai.callerid.data.SpamNumber
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,31 +84,18 @@ class OverlayService : Service() {
             } else null
             val name = if (rawNumber.isNotBlank()) ContactsRepo.nameFor(appContext, rawNumber) else null
 
-            // NumLookup (v1.4): only fetch if caller is unknown and feature is enabled
-            var lookup: LookupCache? = null
-            if (name == null && key.isNotBlank() && Prefs.numLookupEnabled(appContext) &&
-                Prefs.numLookupApiKey(appContext).isNotBlank()
-            ) {
-                val db = SpamDb.get(appContext)
-                val cached = db.lookupDao().getByKeySync(key)
-                if (cached != null) {
-                    lookup = cached
-                } else {
-                    val fresh = NumLookupApi.lookup(appContext, rawNumber)
-                    if (fresh != null) {
-                        val entry = LookupCache(
-                            number = key,
-                            country = fresh.countryName,
-                            carrier = fresh.carrier,
-                            lineType = fresh.lineType
-                        )
-                        db.lookupDao().upsert(entry)
-                        lookup = entry
-                    }
+            // Spam verdict (no API key needed). Shown as a warning; blocking is separate.
+            var shownSpam = spam
+            if (spam == null && Prefs.spamDetectOn(appContext)) {
+                val v = SpamScore.evaluate(appContext, rawNumber, useNetwork = true)
+                if (v.level != SpamLevel.NONE) {
+                    val prefix = if (v.level == SpamLevel.LIKELY) "" else "Suspected: "
+                    shownSpam = SpamNumber(number = key, label = prefix + v.label, blocked = v.level == SpamLevel.LIKELY)
                 }
             }
+            val lookup: LookupCache? = null
 
-            withContext(Dispatchers.Main) { attachOverlay(rawNumber, name, spam, note?.note, lookup) }
+            withContext(Dispatchers.Main) { attachOverlay(rawNumber, name, shownSpam, note?.note, lookup) }
         }
     }
 
@@ -221,6 +210,7 @@ class OverlayService : Service() {
                 SpamDb.get(applicationContext).dao().upsert(
                     SpamNumber(number = key, label = "Blocked from popup", blocked = true)
                 )
+                com.zai.callerid.data.CommunitySpam.report(applicationContext, key, "Spam")
             }
         }
         endCall()

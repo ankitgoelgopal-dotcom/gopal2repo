@@ -91,6 +91,20 @@ object Prefs {
         e.apply()
     }
 
+    // ---- spam detection (no user keys) ----
+    fun spamDetectOn(context: Context): Boolean = sp(context).getBoolean("spam_detect", true)
+    fun setSpamDetectOn(context: Context, v: Boolean) = sp(context).edit().putBoolean("spam_detect", v).apply()
+    fun autoBlockLikely(context: Context): Boolean = sp(context).getBoolean("auto_block_likely", false)
+    fun setAutoBlockLikely(context: Context, v: Boolean) = sp(context).edit().putBoolean("auto_block_likely", v).apply()
+    fun communityOn(context: Context): Boolean = sp(context).getBoolean("community_on", true)
+    fun setCommunityOn(context: Context, v: Boolean) = sp(context).edit().putBoolean("community_on", v).apply()
+    fun reporterId(context: Context): String {
+        val s = sp(context)
+        return s.getString("reporter_id", null) ?: java.util.UUID.randomUUID().toString().also {
+            s.edit().putString("reporter_id", it).apply()
+        }
+    }
+
     // ---- NumLookup API (v1.4) ----
     fun numLookupApiKey(context: Context): String =
         sp(context).getString("numlookup_key", "") ?: ""

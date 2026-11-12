@@ -51,7 +51,13 @@ class SpamScreeningService : CallScreeningService() {
             rawNumber.isNotBlank() &&
             ContactsRepo.nameFor(this, rawNumber) == null
 
-        val reject = rejectSpam || prefixHit || silentHit
+        val autoHit = !rejectSpam && !prefixHit && !silentHit && key.isNotBlank() &&
+            Prefs.spamDetectOn(this) && Prefs.autoBlockLikely(this) &&
+            kotlinx.coroutines.runBlocking {
+                com.zai.callerid.data.SpamScore.evaluate(this@SpamScreeningService, rawNumber, useNetwork = true, timeoutMs = 1500)
+            }.level == com.zai.callerid.data.SpamLevel.LIKELY
+
+        val reject = rejectSpam || prefixHit || silentHit || autoHit
 
         val response = CallResponse.Builder()
             .setDisallowCall(reject)
@@ -65,6 +71,7 @@ class SpamScreeningService : CallScreeningService() {
             val reason = when {
                 rejectSpam -> spam?.label ?: "spam"
                 prefixHit -> "prefix rule"
+                autoHit -> "likely spam"
                 else -> "silent hours"
             }
             notifyBlocked(rawNumber, reason)

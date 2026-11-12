@@ -327,6 +327,7 @@ fun RecentsScreen(modifier: Modifier = Modifier) {
                                     dao.upsert(
                                         SpamNumber(number = key, label = "Reported from Recents", blocked = true)
                                     )
+                                    com.zai.callerid.data.CommunitySpam.report(context.applicationContext, key, "Spam")
                                 }
                             }
                         }
@@ -653,6 +654,7 @@ fun SpamScreen(modifier: Modifier = Modifier) {
                     if (key.isNotBlank()) {
                         scope.launch {
                             db.dao().upsert(SpamNumber(number = key, label = "Added manually", blocked = true))
+                            com.zai.callerid.data.CommunitySpam.report(context.applicationContext, key, "Spam")
                         }
                         newNumber = ""
                     }
@@ -1187,6 +1189,44 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // ---- spam detection ----
+        Card(Modifier.padding(vertical = 6.dp)) {
+            Column(Modifier.padding(14.dp)) {
+                var detectOn by remember { mutableStateOf(Prefs.spamDetectOn(context)) }
+                var autoBlock by remember { mutableStateOf(Prefs.autoBlockLikely(context)) }
+                var community by remember { mutableStateOf(Prefs.communityOn(context)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🛡 Spam detection", fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Switch(checked = detectOn, onCheckedChange = { detectOn = it; Prefs.setSpamDetectOn(context, it) })
+                }
+                Text(
+                    "Warns you about spam and telemarketer calls on the call screen. No account or API key needed.",
+                    fontSize = 12.sp, color = Color.Gray
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Auto-reject likely spam", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Switch(checked = autoBlock, onCheckedChange = { autoBlock = it; Prefs.setAutoBlockLikely(context, it) })
+                }
+                if (com.zai.callerid.data.CommunitySpam.configured()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Use community spam reports", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Switch(checked = community, onCheckedChange = { community = it; Prefs.setCommunityOn(context, it) })
+                    }
+                    Text(
+                        "When you report a number as spam, it helps everyone. Only an anonymous code of the number is shared, never your contacts or call history.",
+                        fontSize = 12.sp, color = Color.Gray
+                    )
+                } else {
+                    Text("Community spam reports: not connected yet.", fontSize = 12.sp, color = Color.Gray)
+                }
+            }
+        }
+
+        var showAdvanced by remember { mutableStateOf(false) }
+        TextButton(onClick = { showAdvanced = !showAdvanced }) {
+            Text(if (showAdvanced) "Hide advanced options ▲" else "Show advanced options ▼")
+        }
+        if (showAdvanced) {
         // ---- family sync (v1.2) ----
         Card(Modifier.padding(vertical = 6.dp)) {
             Column(Modifier.padding(14.dp)) {
@@ -1237,66 +1277,6 @@ fun SetupScreen(modifier: Modifier = Modifier) {
                 }
                 if (syncStatus.isNotBlank()) {
                     Text(syncStatus, fontSize = 13.sp)
-                }
-            }
-        }
-
-        // ---- NumLookup API (v1.4) ----
-        Card(Modifier.padding(vertical = 6.dp)) {
-            Column(Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🌐 Caller ID via NumLookup API", fontSize = 16.sp, modifier = Modifier.weight(1f))
-                    Switch(
-                        checked = numLookupOn,
-                        onCheckedChange = {
-                            numLookupOn = it
-                            Prefs.setNumLookupEnabled(context, it)
-                        }
-                    )
-                }
-                Text(
-                    "Identifies unknown callers automatically (carrier, country, line type) " +
-                        "using the NumLookup API. Free tier: ~100 lookups/month. Sign up at " +
-                        "numlookupapi.com → paste your API key below.\n" +
-                        "Lookups are cached locally so repeat callers don't burn your quota.",
-                    fontSize = 12.sp, color = Color.Gray
-                )
-                OutlinedTextField(
-                    value = numLookupKey,
-                    onValueChange = {
-                        numLookupKey = it
-                        Prefs.setNumLookupApiKey(context, it)
-                    },
-                    label = { Text("NumLookup API key") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
-                )
-                var testNumber by remember { mutableStateOf("") }
-                var testResult by remember { mutableStateOf("") }
-                OutlinedTextField(
-                    value = testNumber,
-                    onValueChange = { testNumber = it },
-                    label = { Text("Test a number e.g. 9876543210") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
-                )
-                Row {
-                    TextButton(onClick = {
-                        scope.launch {
-                            testResult = "Looking up…"
-                            val r = com.zai.callerid.data.NumLookupApi.lookup(context, testNumber)
-                            testResult = if (r != null) "✅ ${r.short()}" else "❌ Failed (check API key + number)"
-                        }
-                    }) { Text("Test lookup") }
-                    if (testResult.isNotBlank()) {
-                        Text(testResult, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
-                    }
                 }
             }
         }
@@ -1375,6 +1355,8 @@ fun SetupScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier.padding(top = 6.dp)
                 )
             }
+        }
+
         }
 
         // ---- ringtones (v1.3) ----
