@@ -14,7 +14,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -414,6 +417,7 @@ fun ContactsScreen(modifier: Modifier = Modifier) {
 
 // ---------------------------------------------------------------- Dialer
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun DialPadScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -477,13 +481,33 @@ fun DialPadScreen(modifier: Modifier = Modifier) {
         }
 
         Spacer(Modifier.weight(1f))
-        Text(
-            number.ifBlank { "Enter number" },
-            fontSize = 28.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(vertical = 16.dp)
-        )
+        var showPaste by remember { mutableStateOf(false) }
+        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+        androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
+            Text(
+                number.ifBlank { "Enter number (hold to paste)" },
+                fontSize = if (number.isBlank()) 20.sp else 28.sp,
+                color = if (number.isBlank()) Color.Gray else Color.Unspecified,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .padding(vertical = 16.dp)
+                    .combinedClickable(onClick = {}, onLongClick = { showPaste = true })
+            )
+            DropdownMenu(expanded = showPaste, onDismissRequest = { showPaste = false }) {
+                DropdownMenuItem(
+                    text = { Text("Paste") },
+                    onClick = {
+                        showPaste = false
+                        // keep only digits and + * # (drops spaces, dashes, brackets)
+                        val pasted = clipboard.getText()?.text.orEmpty()
+                            .filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+                        if (pasted.isNotEmpty()) number += pasted
+                        else android.widget.Toast.makeText(context, "No number in clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        }
         keys.forEach { row ->
             Row(
                 Modifier
