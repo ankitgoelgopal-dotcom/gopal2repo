@@ -463,7 +463,7 @@ fun DialPadScreen(modifier: Modifier = Modifier) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "Cellular calls won't work. You can still call other people over Wi-Fi/data " +
-                            "(both of you need this app + LiveKit configured in Setup).",
+                            "(both of you need this app and an internet connection).",
                         fontSize = 12.sp,
                         color = Color.Gray
                     )
@@ -588,11 +588,10 @@ fun InternetCallDialog(
                         )
                     ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text("⚠ LiveKit not configured", color = Color(0xFFC62828), fontSize = 14.sp)
+                            Text("⚠ Internet calling unavailable", color = Color(0xFFC62828), fontSize = 14.sp)
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Open Setup → \"Internet calling (no SIM)\" and paste your LiveKit URL, API key and secret. " +
-                                    "Both phones need the same credentials to call each other.",
+                                "This build of the app was made without internet calling enabled.",
                                 fontSize = 12.sp
                             )
                         }
@@ -1310,55 +1309,15 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             Column(Modifier.padding(14.dp)) {
                 Text("📡 Internet calling (no SIM)", fontSize = 16.sp)
                 Text(
-                    "Call other people over Wi-Fi/data — both of you need this app + the same LiveKit " +
-                        "credentials. Sign up free at livekit.io (10,000 minutes/month free) and paste " +
-                        "your project URL, API key and secret below.",
+                    "Call other people over Wi-Fi/data — both of you need this app. Nothing to set up.",
                     fontSize = 12.sp, color = Color.Gray
                 )
                 val ready = Prefs.livekitReady(context)
                 Text(
-                    if (ready) "✅ LiveKit configured" else "❌ LiveKit not configured",
+                    if (ready) "✅ Internet calling ready" else "❌ Internet calling not enabled in this build",
                     fontSize = 13.sp,
                     color = if (ready) Color(0xFF2E7D32) else Color(0xFFD32F2F),
                     modifier = Modifier.padding(top = 4.dp)
-                )
-                OutlinedTextField(
-                    value = livekitUrl,
-                    onValueChange = {
-                        livekitUrl = it
-                        Prefs.setLivekitUrl(context, it)
-                    },
-                    label = { Text("LiveKit URL (wss://...)") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
-                )
-                OutlinedTextField(
-                    value = livekitKey,
-                    onValueChange = {
-                        livekitKey = it
-                        Prefs.setLivekitApiKey(context, it)
-                    },
-                    label = { Text("API key") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
-                )
-                OutlinedTextField(
-                    value = livekitSecret,
-                    onValueChange = {
-                        livekitSecret = it
-                        Prefs.setLivekitSecret(context, it)
-                    },
-                    label = { Text("API secret") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
                 )
                 OutlinedTextField(
                     value = livekitIdentity,

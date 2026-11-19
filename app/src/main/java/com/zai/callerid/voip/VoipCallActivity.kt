@@ -1,6 +1,12 @@
 package com.zai.callerid.voip
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import io.livekit.android.LiveKit
+import io.livekit.android.events.RoomEvent
+import io.livekit.android.room.Room
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -48,23 +54,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 
 /**
  * Full-screen internet call.
  *
- * Joins a LiveKit room. We use a tiny hand-rolled WebSocket stub to send the
- * "join" signal and rely on the LiveKit REST-like API to register the
- * participant; this avoids pulling the full LiveKit WebRTC Android SDK
- * (which has class-loading issues we hit at build time). The actual audio
- * transport uses the device's MediaRecorder/AudioTrack APIs for an extremely
- * minimal "push to talk"-style bridge — fine for testing.
- *
- * NOTE: for production-grade calling (proper echo cancellation, low latency,
- * multi-party) you'd swap this implementation out for the official LiveKit
- * Android SDK once you've verified the package import on your end.
+ * Joins a LiveKit room with the official LiveKit Android SDK (real two-way audio).
+ * The call token comes from LiveKit's token server, so no keys are stored in the app.
  */
 class VoipCallActivity : ComponentActivity() {
 
@@ -109,72 +104,90 @@ class VoipCallActivity : ComponentActivity() {
         )
 
         if (!Prefs.livekitReady(this)) {
-            _state.value = _state.value.copy(
-                status = CallStatus.ENDED,
-                error = "LiveKit not configured. Open Setup → Internet calling to add your key."
-            )
+            fail("Internet calling isn't set up in this build.")
             return
         }
-
-        // Simulate the join handshake — in a full build we'd use the LiveKit Android SDK
-        // to actually open the WebSocket, publish the mic, etc. For now we just register
-        // the participant via the REST-like endpoint and let the user know they're
-        // "in the room".
         _state.value = _state.value.copy(status = CallStatus.CONNECTING)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED
+        ) connectToRoom() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    private var room: Room? = null
+
+    private val micPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) connectToRoom() else fail("Microphone permission is needed to talk.")
+    }
+
+    private fun fail(message: String) {
+        _state.value = _state.value.copy(status = CallStatus.ENDED, error = message)
+    }
+
+    private fun connectToRoom() {
         scope.launch {
-            val ok = registerParticipant()
-            if (ok) {
+            try {
+                val s = _state.value
+                val base = s.identity.ifBlank { "user" }
+                // unique identity per phone so two people with the same name don't kick each other out
+                val identity = base + "-" + (1000..9999).random()
+                val (url, token) = CallTokens.fetch(s.roomName, identity, base)
+                    ?: return@launch fail("Could not start the call. Check your internet connection.")
+                val r = LiveKit.create(applicationContext)
+                room = r
+                launch { r.events.collect { handleEvent(it, r) } }
+                r.connect(url, token)
+                r.localParticipant.setMicrophoneEnabled(true)
+                val others = r.remoteParticipants.size
                 _state.value = _state.value.copy(
-                    status = CallStatus.WAITING_FOR_REMOTE,
-                    micEnabled = true
+                    micEnabled = true,
+                    remoteCount = others,
+                    status = if (others > 0) CallStatus.IN_CALL else CallStatus.WAITING_FOR_REMOTE
                 )
-            } else {
-                _state.value = _state.value.copy(
-                    status = CallStatus.ENDED,
-                    error = "Could not register with LiveKit. Check your API key/secret and URL."
-                )
+            } catch (e: Exception) {
+                fail("Could not connect: ${e.message ?: "unknown error"}")
             }
         }
     }
 
-    /**
-     * Best-effort participant registration against the LiveKit server.
-     * Real audio transport requires the official LiveKit Android client SDK
-     * (which we couldn't import reliably in this build) — but registration
-     * succeeds so the user gets confirmation the credentials work.
-     */
-    private suspend fun registerParticipant(): Boolean {
-        return try {
-            val s = _state.value
-            val token = VoipToken.generate(this, s.roomName, s.identity) ?: return false
-            val url = Prefs.livekitUrl(this).replace("wss://", "https://")
-            withContext0 {
-                val conn = URL("$url/rtc/validate?token=" + URLEncoder.encode(token, "UTF-8"))
-                    .openConnection() as HttpURLConnection
-                conn.connectTimeout = 8_000
-                conn.readTimeout = 8_000
-                conn.requestMethod = "GET"
-                conn.setRequestProperty("Authorization", "Bearer $token")
-                val code = conn.responseCode
-                conn.disconnect()
-                code in 200..299
+    private fun handleEvent(ev: RoomEvent, r: Room) {
+        when (ev) {
+            is RoomEvent.ParticipantConnected ->
+                _state.value = _state.value.copy(remoteCount = r.remoteParticipants.size, status = CallStatus.IN_CALL)
+            is RoomEvent.ParticipantDisconnected -> {
+                val n = r.remoteParticipants.size
+                _state.value = _state.value.copy(
+                    remoteCount = n,
+                    status = if (n == 0) CallStatus.REMOTE_LEFT else CallStatus.IN_CALL
+                )
             }
-        } catch (e: Exception) {
-            false
+            is RoomEvent.Disconnected ->
+                if (_state.value.status != CallStatus.ENDED) {
+                    _state.value = _state.value.copy(status = CallStatus.ENDED, error = "Call ended")
+                }
+            else -> {}
         }
     }
 
     private fun toggleMic() {
-        _state.value = _state.value.copy(micEnabled = !_state.value.micEnabled)
+        val on = !_state.value.micEnabled
+        scope.launch {
+            try { room?.localParticipant?.setMicrophoneEnabled(on) } catch (_: Exception) { }
+            _state.value = _state.value.copy(micEnabled = on)
+        }
     }
 
     private fun endCall() {
         _state.value = _state.value.copy(status = CallStatus.ENDED)
+        try { room?.disconnect() } catch (_: Exception) { }
         finish()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        try { room?.disconnect(); room?.release() } catch (_: Exception) { }
+        room = null
     }
 
     @Composable
@@ -306,7 +319,3 @@ data class CallState(
     val remoteCount: Int = 0,
     val error: String? = null
 )
-
-/** Offload to IO dispatcher without an extra import in callers. */
-private suspend fun <T> withContext0(block: () -> T): T =
-    kotlinx.coroutines.withContext(Dispatchers.IO) { block() }

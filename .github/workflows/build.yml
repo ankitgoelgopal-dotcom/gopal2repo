@@ -10,6 +10,7 @@ jobs:
     env:
       SPAM_API_URL: ${{ secrets.SPAM_API_URL }}
       SPAM_API_KEY: ${{ secrets.SPAM_API_KEY }}
+      LIVEKIT_SANDBOX_ID: ${{ secrets.LIVEKIT_SANDBOX_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

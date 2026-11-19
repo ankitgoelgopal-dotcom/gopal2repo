@@ -31,6 +31,8 @@ android {
     defaultConfig {
         val spamUrl = (project.findProperty("spamApiUrl") as String?) ?: System.getenv("SPAM_API_URL") ?: ""
         val spamKey = (project.findProperty("spamApiKey") as String?) ?: System.getenv("SPAM_API_KEY") ?: ""
+        val lkSandbox = (project.findProperty("livekitSandboxId") as String?) ?: System.getenv("LIVEKIT_SANDBOX_ID") ?: ""
+        buildConfigField("String", "LIVEKIT_SANDBOX_ID", "\"$lkSandbox\"")
         buildConfigField("String", "SPAM_API_URL", "\"$spamUrl\"")
         buildConfigField("String", "SPAM_API_KEY", "\"$spamKey\"")
         applicationId = "com.zai.callerid"
@@ -81,6 +83,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("io.livekit:livekit-android:2.5.0")
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")

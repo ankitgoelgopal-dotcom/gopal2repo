@@ -143,8 +143,7 @@ object Prefs {
     fun setLivekitIdentity(context: Context, value: String) =
         sp(context).edit().putString("livekit_identity", value.trim().ifBlank { "user" + (1000..9999).random() }).apply()
 
-    fun livekitReady(context: Context): Boolean =
-        livekitUrl(context).startsWith("wss://") &&
-            livekitApiKey(context).isNotBlank() &&
-            livekitSecret(context).isNotBlank()
+    /** Internet calling uses LiveKit's token server; the ID is built into the app (no keys for users). */
+    fun livekitReady(@Suppress("UNUSED_PARAMETER") context: Context): Boolean =
+        com.zai.callerid.BuildConfig.LIVEKIT_SANDBOX_ID.isNotBlank()
 }
