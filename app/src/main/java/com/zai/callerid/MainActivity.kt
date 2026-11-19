@@ -556,6 +556,10 @@ fun DialPadScreen(modifier: Modifier = Modifier) {
             onStart = { roomName ->
                 showInternetCallDialog = false
                 VoipCallActivity.start(context, roomName, asHost = true)
+            },
+            onStartVideo = { roomName ->
+                showInternetCallDialog = false
+                VoipCallActivity.start(context, roomName, asHost = true, video = true)
             }
         )
     }
@@ -564,7 +568,8 @@ fun DialPadScreen(modifier: Modifier = Modifier) {
 @Composable
 fun InternetCallDialog(
     onDismiss: () -> Unit,
-    onStart: (String) -> Unit
+    onStart: (String) -> Unit,
+    onStartVideo: (String) -> Unit
 ) {
     val context = LocalContext.current
     val roomId = remember {
@@ -611,7 +616,7 @@ fun InternetCallDialog(
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Send this link to anyone with the app installed. Tap \"Share\" to send via any messaging app, " +
-                        "or \"Start call\" to begin now (they'll join when they tap the link).",
+                        "or \"Voice\" / \"Video\" to begin now (they'll join when they tap the link).",
                     fontSize = 12.sp,
                     color = Color.Gray
                 )
@@ -631,8 +636,10 @@ fun InternetCallDialog(
                 }) { Text("Share link") }
                 Spacer(Modifier.width(4.dp))
                 FilledTonalButton(onClick = { onStart(roomId) }) {
-                    Text(if (ready) "Start call" else "Start anyway")
+                    Text(if (ready) "Voice" else "Start anyway")
                 }
+                Spacer(Modifier.width(4.dp))
+                FilledTonalButton(onClick = { onStartVideo(roomId) }) { Text("Video") }
             }
         },
         dismissButton = {

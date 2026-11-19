@@ -7,6 +7,14 @@ import androidx.core.content.ContextCompat
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.room.Room
+import io.livekit.android.room.track.Track
+import io.livekit.android.room.track.VideoTrack
+import io.livekit.android.renderer.TextureViewRenderer
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -67,12 +75,14 @@ class VoipCallActivity : ComponentActivity() {
         const val EXTRA_ROOM = "extra_room"
         const val EXTRA_AS_HOST = "extra_as_host"
         const val EXTRA_IDENTITY = "extra_identity"
+        const val EXTRA_VIDEO = "extra_video"
 
-        fun start(context: Context, roomName: String, asHost: Boolean, identity: String? = null) {
+        fun start(context: Context, roomName: String, asHost: Boolean, identity: String? = null, video: Boolean = false) {
             context.startActivity(
                 Intent(context, VoipCallActivity::class.java).apply {
                     putExtra(EXTRA_ROOM, roomName)
                     putExtra(EXTRA_AS_HOST, asHost)
+                    putExtra(EXTRA_VIDEO, video)
                     if (identity != null) putExtra(EXTRA_IDENTITY, identity)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
@@ -114,6 +124,36 @@ class VoipCallActivity : ComponentActivity() {
     }
 
     private var room: Room? = null
+    private var roomState by mutableStateOf<Room?>(null)
+    private var remoteVideo by mutableStateOf<VideoTrack?>(null)
+    private var localVideo by mutableStateOf<VideoTrack?>(null)
+    private var camOn by mutableStateOf(false)
+
+    private val camPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) setCamera(true)
+        else android.widget.Toast.makeText(this, "Camera permission is needed for video", android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    private fun toggleCamera() {
+        if (camOn) { setCamera(false); return }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) setCamera(true)
+        else camPermission.launch(Manifest.permission.CAMERA)
+    }
+
+    private fun setCamera(on: Boolean) {
+        scope.launch {
+            try {
+                val lp = room?.localParticipant ?: return@launch
+                lp.setCameraEnabled(on)
+                camOn = on
+                localVideo = if (on) lp.getTrackPublication(Track.Source.CAMERA)?.track as? VideoTrack else null
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(this@VoipCallActivity, "Camera error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     private val micPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -136,6 +176,7 @@ class VoipCallActivity : ComponentActivity() {
                     ?: return@launch fail("Could not start the call. Check your internet connection.")
                 val r = LiveKit.create(applicationContext)
                 room = r
+                roomState = r
                 launch { r.events.events.collect { ev -> handleEvent(ev, r) } }
                 r.connect(url, token)
                 r.localParticipant.setMicrophoneEnabled(true)
@@ -145,6 +186,7 @@ class VoipCallActivity : ComponentActivity() {
                     remoteCount = others,
                     status = if (others > 0) CallStatus.IN_CALL else CallStatus.WAITING_FOR_REMOTE
                 )
+                if (intent.getBooleanExtra(EXTRA_VIDEO, false)) toggleCamera()
             } catch (e: Exception) {
                 fail("Could not connect: ${e.message ?: "unknown error"}")
             }
@@ -157,11 +199,17 @@ class VoipCallActivity : ComponentActivity() {
                 _state.value = _state.value.copy(remoteCount = r.remoteParticipants.size, status = CallStatus.IN_CALL)
             is RoomEvent.ParticipantDisconnected -> {
                 val n = r.remoteParticipants.size
+                if (n == 0) remoteVideo = null
                 _state.value = _state.value.copy(
                     remoteCount = n,
                     status = if (n == 0) CallStatus.REMOTE_LEFT else CallStatus.IN_CALL
                 )
             }
+            is RoomEvent.TrackSubscribed -> {
+                val t = ev.track
+                if (t is VideoTrack) remoteVideo = t
+            }
+            is RoomEvent.TrackUnsubscribed -> if (ev.track === remoteVideo) remoteVideo = null
             is RoomEvent.Disconnected ->
                 if (_state.value.status != CallStatus.ENDED) {
                     _state.value = _state.value.copy(status = CallStatus.ENDED, error = "Call ended")
@@ -228,7 +276,26 @@ class VoipCallActivity : ComponentActivity() {
                         )
                     }
 
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (remoteVideo != null || localVideo != null) {
+                        Box(
+                            Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)
+                        ) {
+                            VideoView(remoteVideo, roomState, Modifier.fillMaxSize())
+                            if (remoteVideo == null) {
+                                Text(
+                                    if (s.status == CallStatus.IN_CALL) "Their camera is off" else "Waiting for the other person…",
+                                    color = Color.White, fontSize = 16.sp,
+                                    modifier = Modifier.align(Alignment.Center)
+                                )
+                            }
+                            if (localVideo != null) {
+                                VideoView(
+                                    localVideo, roomState,
+                                    Modifier.align(Alignment.TopEnd).size(width = 110.dp, height = 150.dp).padding(4.dp)
+                                )
+                            }
+                        }
+                    } else Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         when (s.status) {
                             CallStatus.CONNECTING -> {
                                 CircularProgressIndicator(color = Color(0xFF128C7E))
@@ -287,6 +354,20 @@ class VoipCallActivity : ComponentActivity() {
                             )
                         }
                         IconButton(
+                            onClick = { toggleCamera() },
+                            modifier = Modifier.size(64.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = if (camOn) Color(0xFF128C7E) else Color.White.copy(alpha = 0.15f)
+                            )
+                        ) {
+                            Icon(
+                                if (camOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
+                                contentDescription = "Camera",
+                                tint = Color.White,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        IconButton(
                             onClick = { endCall() },
                             modifier = Modifier.size(72.dp),
                             colors = IconButtonDefaults.iconButtonColors(
@@ -319,3 +400,23 @@ data class CallState(
     val remoteCount: Int = 0,
     val error: String? = null
 )
+
+@Composable
+private fun VideoView(track: VideoTrack?, room: Room?, modifier: Modifier) {
+    if (track == null || room == null) return
+    var renderer by remember { mutableStateOf<TextureViewRenderer?>(null) }
+    AndroidView(
+        factory = { ctx ->
+            TextureViewRenderer(ctx).also {
+                room.initVideoRenderer(it)
+                renderer = it
+            }
+        },
+        modifier = modifier
+    )
+    DisposableEffect(track, renderer) {
+        val r = renderer
+        if (r != null) track.addRenderer(r)
+        onDispose { if (r != null) track.removeRenderer(r) }
+    }
+}
