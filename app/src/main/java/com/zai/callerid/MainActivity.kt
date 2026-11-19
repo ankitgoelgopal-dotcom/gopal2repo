@@ -51,6 +51,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -546,6 +547,13 @@ fun DialPadScreen(modifier: Modifier = Modifier) {
             IconButton(onClick = { number = "" }) {
                 Icon(Icons.Filled.Delete, contentDescription = "Clear")
             }
+        }
+        // Always visible (not only when there is no SIM)
+        if (Prefs.livekitReady(context)) {
+            OutlinedButton(
+                onClick = { showInternetCallDialog = true },
+                modifier = Modifier.padding(top = 8.dp)
+            ) { Text("📡 Internet call (voice / video)") }
         }
         Spacer(Modifier.weight(1f))
     }
