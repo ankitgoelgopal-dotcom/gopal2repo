@@ -105,6 +105,11 @@ object Prefs {
         }
     }
 
+    // ---- family shared list (share code) ----
+    fun familyCode(context: Context): String = sp(context).getString("family_code", "") ?: ""
+    fun setFamilyCode(context: Context, v: String) =
+        sp(context).edit().putString("family_code", v.trim().uppercase()).apply()
+
     // ---- NumLookup API (v1.4) ----
     fun numLookupApiKey(context: Context): String =
         sp(context).getString("numlookup_key", "") ?: ""

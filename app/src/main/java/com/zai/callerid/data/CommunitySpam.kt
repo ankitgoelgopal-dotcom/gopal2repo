@@ -33,7 +33,7 @@ object CommunitySpam {
             cache[key]?.let { (t, r) -> if (System.currentTimeMillis() - t < 6 * 3600_000L) return r }
         }
         return try {
-            val r = call("spam_lookup", JSONObject().put("h", hash(key)), timeoutMs)?.let { body ->
+            val r = rpc("spam_lookup", JSONObject().put("h", hash(key)), timeoutMs)?.let { body ->
                 val arr = JSONArray(body)
                 if (arr.length() == 0) null
                 else arr.getJSONObject(0).let { Result(it.optInt("reports", 0), it.optString("label", "")) }
@@ -47,7 +47,7 @@ object CommunitySpam {
     suspend fun report(context: Context, key: String, label: String) {
         if (!configured() || !Prefs.communityOn(context) || key.isBlank()) return
         try {
-            call(
+            rpc(
                 "spam_report",
                 JSONObject().put("h", hash(key)).put("r", Prefs.reporterId(context)).put("lbl", label.take(40)),
                 6000
@@ -56,7 +56,7 @@ object CommunitySpam {
         } catch (_: Exception) { }
     }
 
-    private suspend fun call(fn: String, body: JSONObject, timeoutMs: Int): String? = withContext(Dispatchers.IO) {
+    suspend fun rpc(fn: String, body: JSONObject, timeoutMs: Int): String? = withContext(Dispatchers.IO) {
         val conn = URL("${BuildConfig.SPAM_API_URL.trimEnd('/')}/rest/v1/rpc/$fn").openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = timeoutMs

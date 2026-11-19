@@ -994,8 +994,7 @@ fun SetupScreen(modifier: Modifier = Modifier) {
     ) { granted -> if (granted) { Prefs.setSmsEnabled(context, true); smsOn = true } }
 
     // family sync state
-    var gistId by remember { mutableStateOf("") }
-    var gistToken by remember { mutableStateOf("") }
+    var familyCode by remember { mutableStateOf(Prefs.familyCode(context)) }
     var syncStatus by remember { mutableStateOf("") }
 
     // ringtone state (v1.3)
@@ -1262,48 +1261,55 @@ fun SetupScreen(modifier: Modifier = Modifier) {
             Column(Modifier.padding(14.dp)) {
                 Text("👨‍👩‍👧 Family / friends shared spam list", fontSize = 16.sp)
                 Text(
-                    "Sync your blocklist with up to a few family members for free using a GitHub Gist as the backend.\n" +
-                        "1. Owner: create a (secret) gist at gist.github.com — its ID is the last part of the URL.\n" +
-                        "2. Paste the same Gist ID into everyone's app.\n" +
-                        "3. Push uploads your list, Pull merges the shared list into yours.\n" +
-                        "4. Push needs a GitHub token with gist scope (classic token works); Pull of public gists needs none.",
+                    "Share your blocked numbers with family or friends. Tap Create, then send them the code. " +
+                        "They type the same code here. Nothing else to set up.",
                     fontSize = 12.sp, color = Color.Gray
                 )
+                if (familyCode.isBlank()) {
+                    Button(
+                        onClick = {
+                            familyCode = SyncRepo.newCode()
+                            Prefs.setFamilyCode(context, familyCode)
+                        },
+                        modifier = Modifier.padding(top = 6.dp)
+                    ) { Text("Create a new share code") }
+                }
                 OutlinedTextField(
-                    value = gistId,
-                    onValueChange = { gistId = it.trim() },
-                    label = { Text("Gist ID") },
+                    value = familyCode,
+                    onValueChange = {
+                        familyCode = it.trim().uppercase()
+                        Prefs.setFamilyCode(context, familyCode)
+                    },
+                    label = { Text("Share code (or enter one you were given)") },
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 6.dp)
                 )
-                OutlinedTextField(
-                    value = gistToken,
-                    onValueChange = { gistToken = it.trim() },
-                    label = { Text("GitHub token (only needed to Push)") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
-                )
+                if (familyCode.isNotBlank()) {
+                    TextButton(onClick = {
+                        val share = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "Join my spam list on TrueCall ID. Setup > Advanced > Family list, enter code: $familyCode")
+                        }
+                        context.startActivity(Intent.createChooser(share, "Share code"))
+                    }) { Text("Send this code to family") }
+                }
                 Row(modifier = Modifier.padding(top = 6.dp)) {
                     TextButton(onClick = {
                         scope.launch {
-                            syncStatus = "Pulling…"
-                            val result = SyncRepo.pull(context, gistId, gistToken)
+                            syncStatus = "Loading…"
+                            val result = SyncRepo.pull(context, familyCode)
                             withContext(Dispatchers.Main) { syncStatus = result }
                         }
-                    }) { Text("Pull shared list") }
+                    }) { Text("Get group list") }
                     TextButton(onClick = {
                         scope.launch {
-                            syncStatus = "Pushing…"
-                            val result = SyncRepo.push(context, gistId, gistToken)
+                            syncStatus = "Sharing…"
+                            val result = SyncRepo.push(context, familyCode)
                             withContext(Dispatchers.Main) { syncStatus = result }
                         }
-                    }) { Text("Push my list") }
+                    }) { Text("Share my list") }
                 }
                 if (syncStatus.isNotBlank()) {
                     Text(syncStatus, fontSize = 13.sp)
