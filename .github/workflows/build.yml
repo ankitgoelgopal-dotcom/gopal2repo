@@ -53,11 +53,20 @@ jobs:
 
       - name: Build release APK (signed)
         if: steps.signing.outputs.release == 'true'
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
 
       - name: Build debug APK (fallback)
         if: steps.signing.outputs.release != 'true'
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Show build errors
+        if: failure()
+        run: |
+          grep -E "^e: |What went wrong|Execution failed|Could not|Duplicate class|error:" -A2 build.log | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
 
       - name: Upload release APK
         if: steps.signing.outputs.release == 'true'
