@@ -136,7 +136,7 @@ class VoipCallActivity : ComponentActivity() {
                     ?: return@launch fail("Could not start the call. Check your internet connection.")
                 val r = LiveKit.create(applicationContext)
                 room = r
-                launch { r.events.collect { handleEvent(it, r) } }
+                launch { r.events.events.collect { ev -> handleEvent(ev, r) } }
                 r.connect(url, token)
                 r.localParticipant.setMicrophoneEnabled(true)
                 val others = r.remoteParticipants.size
